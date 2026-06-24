@@ -16,10 +16,26 @@ limit is reached, so you never blow past a third-party API's quota.
 - Per-second / per-minute / per-hour / per-day limits with a fluent factory.
 - A one-line `Http::rateLimit(...)` macro and a `RateLimits` facade for a discoverable,
   IDE-autocompleted calling convention.
+- **Named limiter profiles** — define a limit once in config and reference it by name:
+  `Http::rateLimit('github')`.
+- **Compound limits** — enforce several windows at once (e.g. 5/sec **and** 100/min); the
+  strictest wins.
+- **Max-wait cap** — `->maxWait(ms)` fails fast with a typed exception instead of blocking
+  past a ceiling.
+- **Response-header adaptive limiting** — `->adaptive()` reads `Retry-After` /
+  `X-RateLimit-*` and self-tunes the store to the server's own budget.
+- **Jitter / spread** — `->jitter(ms)` adds randomised wait to avoid thundering-herd
+  alignment (the randomness source is injectable for deterministic tests).
+- **Pre-flight inspection** — `remaining()`, `availableIn()`, `tooManyAttempts()` from the
+  fluent surface.
+- **Queue-aware deferrer** — `ReleaseDeferrer` releases a queued job back onto the queue
+  (with the computed delay) instead of blocking the worker.
+- **Testing fake** — `RateLimits::fake()` plus `assertDeferred()`, `assertAllowed()`,
+  `assertNothingDeferred()` to test throttling without real sleeps or Redis.
 - Pluggable **Store** (where request timestamps are kept) and **Deferrer** (how the wait is
   performed). Ships an in-process `InMemoryStore`, a `CacheStore` (shared via any cache the
-  app already runs — no Redis required), a strictly-atomic `RedisStore`, and a millisecond
-  `SleepDeferrer`.
+  app already runs — no Redis required), a strictly-atomic `RedisStore`, a `DatabaseStore`
+  (for apps with no Redis), and a millisecond `SleepDeferrer`.
 - Scope a limit to an "owner" (e.g. an IP or account) so independent callers don't share a
   budget.
 - Dispatches `RequestDeferred` / `RequestAllowed` events so you can log, meter, or alert on
@@ -45,12 +61,26 @@ The service provider is auto-discovered. Optionally publish the config file:
 php artisan vendor:publish --tag="http-client-rate-limits-config"
 ```
 
+Only if you use the `DatabaseStore`, publish and run its migration:
+
+```bash
+php artisan vendor:publish --tag="http-client-rate-limits-migrations"
+php artisan migrate
+```
+
 ## Configuration
 
 The published file lives at `config/http-client-rate-limits.php`:
 
 ```php
 return [
+    // Named limiter profiles referenced by string: Http::rateLimit('github').
+    // Each is ['rate' => int, 'per' => second|minute|hour|day] plus optional
+    // 'by', 'trim', 'max_wait' (ms), 'jitter' (ms), 'adaptive' (bool).
+    'limiters' => [
+        // 'github' => ['rate' => 5, 'per' => 'second', 'by' => null],
+    ],
+
     // Default Store used by RateLimit::make()/perSecond()/perMinute()/perHour().
     // Must implement RoundlyConsulting\HttpClientRateLimits\Store\Store.
     'store' => env('HTTP_CLIENT_RATE_LIMITS_STORE', InMemoryStore::class),
@@ -73,6 +103,7 @@ return [
 
 | Key | Type | Default | Env | Purpose |
 |---|---|---|---|---|
+| `limiters` | `array<string, array>` | `[]` | — | Named limiter profiles referenced by string. |
 | `store` | `class-string<Store>` | `InMemoryStore::class` | `HTTP_CLIENT_RATE_LIMITS_STORE` | Default store for new rate limits. |
 | `deferrer` | `class-string<Deferrer>` | `SleepDeferrer::class` | `HTTP_CLIENT_RATE_LIMITS_DEFERRER` | Default deferrer for new rate limits. |
 | `cache_store` | `?string` | `null` | `HTTP_CLIENT_RATE_LIMITS_CACHE_STORE` | Cache store name used by `CacheStore` (`null` = default). |
@@ -132,6 +163,94 @@ RateLimit::perSecond(int $maxAttempts = 1);      // N requests per second
 RateLimit::perMinute(int $maxAttempts = 1);      // N requests per minute
 RateLimit::perHour(int $maxAttempts = 1);        // N requests per hour
 RateLimit::perDay(int $maxAttempts = 1);         // N requests per day
+```
+
+Each returned `RateLimit` is fluent: `->by(...)`, `->alongside(...)`, `->maxWait(...)`,
+`->jitter(...)`, `->adaptive()`, `->remaining()`, `->availableIn()`, `->tooManyAttempts()`.
+
+The `RateLimits` facade adds `profile(string $name)` and `compound(array $limits)`.
+
+### Named limiter profiles
+
+Define reusable limits once in `config/http-client-rate-limits.php` and reference them by
+name from anywhere:
+
+```php
+// config/http-client-rate-limits.php
+'limiters' => [
+    'github' => ['rate' => 5, 'per' => 'second'],
+    'billing' => ['rate' => 100, 'per' => 'minute', 'by' => 'tenant-1', 'jitter' => 50],
+],
+```
+
+```php
+Http::rateLimit('github')->get('https://api.github.com/user');
+```
+
+Referencing a name that isn't defined throws `UnknownLimiterProfileException`. Each profile
+array accepts `rate`, `per`, and the optional `by`, `trim`, `max_wait`, `jitter`, and
+`adaptive` keys.
+
+### Compound limits (several windows at once)
+
+Pass an array of limits to enforce them all on one request; the limiter defers to the
+strictest and records a hit on every window when the call is allowed:
+
+```php
+use RoundlyConsulting\HttpClientRateLimits\RateLimit;
+
+Http::rateLimit([RateLimit::perSecond(5), RateLimit::perMinute(100)])
+    ->get('https://api.example.com/things');
+
+// Or fluently, alongside the primary window:
+$middleware = RateLimit::perSecond(5)->alongside(RateLimit::perMinute(100));
+```
+
+### Fail fast with a max-wait cap
+
+When you'd rather error than block for too long, cap the wait. A computed defer above the
+ceiling throws `RateLimitExceededException` (extends `RateLimitException`) instead of sleeping:
+
+```php
+Http::rateLimit(RateLimit::perHour(10)->maxWait(5_000)) // milliseconds
+    ->get('https://api.example.com/report');
+```
+
+### Jitter / spread
+
+Add randomised jitter to defers so many workers don't all wake at the same instant:
+
+```php
+Http::rateLimit(RateLimit::perMinute(30)->jitter(50)) // ± up to 50ms
+    ->get('https://api.example.com/orders');
+```
+
+The randomness source is the injectable `Randomizer` contract — swap it in a `Limiter` for
+deterministic tests.
+
+### Adaptive limiting (honour the server's own budget)
+
+Opt in with `->adaptive()` and the limiter reads `Retry-After` and `X-RateLimit-Remaining` /
+`X-RateLimit-Reset` from each response, recording a penalty in the store so the next request
+waits exactly as long as the server asked:
+
+```php
+Http::rateLimit(RateLimit::perSecond(20)->adaptive())
+    ->get('https://api.example.com/things');
+```
+
+### Pre-flight inspection
+
+Ask the limiter about the current state before sending — without recording a hit:
+
+```php
+use RoundlyConsulting\HttpClientRateLimits\Facades\RateLimits;
+
+$limit = RateLimits::perMinute(30)->by('acct-1');
+
+$limit->remaining();        // requests still allowed in the window
+$limit->availableIn();      // ms until the next request is allowed (0 = now)
+$limit->tooManyAttempts();  // bool — is the window exhausted right now?
 ```
 
 ### The `RateLimits` facade
@@ -225,18 +344,42 @@ arguments to reset back to the config-driven defaults.
   $store = new RedisStore('default');
   ```
 
+- **`DatabaseStore`** — shares limits through a database table (Eloquent, never the `DB`
+  facade) for apps that run only a file/database cache and have no Redis. Select it with
+  `'store' => DatabaseStore::class` and publish/run its migration (see Installation):
+
+  ```php
+  use RoundlyConsulting\HttpClientRateLimits\Store\DatabaseStore;
+
+  $store = new DatabaseStore;
+  ```
+
 Both the `CacheStore` and `RedisStore` self-trim entries older than the largest supported
-window so long-lived keys stay bounded. Write your own by implementing
+window so long-lived keys stay bounded. Every store also records server-imposed penalties for
+adaptive limiting via `penalizeUntil()` / `penalizedUntil()`. Write your own by implementing
 `RoundlyConsulting\HttpClientRateLimits\Store\Store`.
 
 ### Deferrers
 
 - **`SleepDeferrer`** (default) — reads the current time in milliseconds and pauses with
   `Illuminate\Support\Sleep` (fakeable in tests).
+- **`ReleaseDeferrer`** — for use inside a queued job: instead of blocking the worker, it
+  releases the job back onto the queue with the computed delay and throws
+  `JobReleasedException` to unwind the current attempt. Construct it with the job and opt in
+  via `RateLimits::usingDeferrer(...)`:
+
+  ```php
+  use RoundlyConsulting\HttpClientRateLimits\Deferrer\ReleaseDeferrer;
+  use RoundlyConsulting\HttpClientRateLimits\Facades\RateLimits;
+
+  // inside a queued job's handle(), $this uses Illuminate\Queue\InteractsWithQueue
+  $rateLimit = RateLimits::usingDeferrer(new ReleaseDeferrer($this))->perSecond(5);
+
+  Http::withMiddleware($rateLimit)->get('https://api.example.com/things');
+  ```
 
 Write your own by implementing
-`RoundlyConsulting\HttpClientRateLimits\Deferrer\Deferrer` — for example to queue/delay the
-request instead of sleeping.
+`RoundlyConsulting\HttpClientRateLimits\Deferrer\Deferrer`.
 
 ### Events
 
@@ -266,9 +409,9 @@ Set `events_enabled` to `false` for the lowest possible overhead.
 
 ### Reacting to 429 / Retry-After
 
-This package *paces* outgoing requests proactively; it doesn't react to responses. Real APIs
-also reject requests with `429 Too Many Requests` and a `Retry-After` header. Combine this
-middleware with Laravel's own `->retry()` and the `RetryAfter` helper to honour that signal:
+This package *paces* outgoing requests proactively. To also react to a server's own signals,
+use `->adaptive()` (above) or combine the middleware with Laravel's own `->retry()` and the
+`RetryAfter` helper to honour a `429 Too Many Requests` / `Retry-After` response:
 
 ```php
 use RoundlyConsulting\HttpClientRateLimits\RetryAfter;
@@ -282,6 +425,28 @@ Http::rateLimit(RateLimit::perMinute(60))
 `RetryAfter::seconds()` accepts a `Response` or a `RequestException`, parses both the
 delta-seconds and HTTP-date forms of the header, and returns `null` when it's absent or
 unparseable.
+
+### Testing your own code
+
+Swap the manager for a recording fake so your suite can assert on throttling without real
+sleeps or Redis:
+
+```php
+use RoundlyConsulting\HttpClientRateLimits\Facades\RateLimits;
+
+$fake = RateLimits::fake();
+
+Http::rateLimit(1, by: 'acct-1')->get('https://api.example.com/one');
+Http::rateLimit(1, by: 'acct-1')->get('https://api.example.com/two');
+
+$fake->assertDeferred('acct-1');   // a request for this key was throttled
+$fake->assertAllowed();            // at least one request went through
+// $fake->assertNothingDeferred(); // would fail here
+```
+
+`fake()` returns a `RateLimitsFake` exposing `assertDeferred(?string $key)`,
+`assertAllowed(?string $key)`, `assertNothingDeferred()`, and the shared `store()` /
+`deferrer()` for finer-grained assertions.
 
 ## Testing
 

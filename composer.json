@@ -20,6 +20,8 @@
     "require": {
         "php": "^8.4",
         "illuminate/contracts": "^12.0|^13.0",
+        "illuminate/database": "^12.0|^13.0",
+        "illuminate/http": "^12.0|^13.0",
         "illuminate/support": "^12.0|^13.0"
     },
     "require-dev": {
@@ -36,7 +38,8 @@
     },
     "autoload": {
         "psr-4": {
-            "RoundlyConsulting\\HttpClientRateLimits\\": "src/"
+            "RoundlyConsulting\\HttpClientRateLimits\\": "src/",
+            "RoundlyConsulting\\HttpClientRateLimits\\Database\\Factories\\": "database/factories/"
         }
     },
     "autoload-dev": {

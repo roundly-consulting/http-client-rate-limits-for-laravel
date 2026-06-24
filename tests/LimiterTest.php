@@ -63,6 +63,16 @@ it('has getter and seter for store', function () {
         {
             //
         }
+
+        public function penalizeUntil(string $owner, int $timestamp): void
+        {
+            //
+        }
+
+        public function penalizedUntil(string $owner): ?int
+        {
+            return null;
+        }
     };
 
     $limiter->setStore($anonymousStore);

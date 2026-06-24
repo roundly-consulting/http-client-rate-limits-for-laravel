@@ -9,6 +9,9 @@ class InMemoryStore implements Store
     /** @var array<string, list<int>> */
     protected array $timestamps = [];
 
+    /** @var array<string, int> */
+    protected array $penalties = [];
+
     public function hit(string $owner, int $timestamp): void
     {
         if (! array_key_exists($owner, $this->timestamps)) {
@@ -41,5 +44,15 @@ class InMemoryStore implements Store
         $this->timestamps[$owner] = array_values(
             array_filter($this->hits($owner), fn (int $record) => $record > $timestamp),
         );
+    }
+
+    public function penalizeUntil(string $owner, int $timestamp): void
+    {
+        $this->penalties[$owner] = max($this->penalties[$owner] ?? 0, $timestamp);
+    }
+
+    public function penalizedUntil(string $owner): ?int
+    {
+        return $this->penalties[$owner] ?? null;
     }
 }

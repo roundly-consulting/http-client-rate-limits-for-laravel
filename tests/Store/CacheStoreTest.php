@@ -120,3 +120,19 @@ it('falls back to a best-effort write when the cache store has no lock support',
 it('confirms the array store is a lock provider for the atomic path', function () {
     expect(new ArrayStore)->toBeInstanceOf(LockProvider::class);
 });
+
+it('records and reads penalties keeping the latest', function () {
+    $store = new CacheStore(store: 'array');
+
+    expect($store->penalizedUntil('john'))->toBeNull()
+        ->and($store->penaltyKey('john'))->toBe('http-client-rate-limits:john:penalty');
+
+    $store->penalizeUntil('john', 5_000);
+    expect($store->penalizedUntil('john'))->toBe(5_000);
+
+    $store->penalizeUntil('john', 4_000);
+    expect($store->penalizedUntil('john'))->toBe(5_000);
+
+    $store->penalizeUntil('john', 9_000);
+    expect($store->penalizedUntil('john'))->toBe(9_000);
+});

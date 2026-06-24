@@ -20,6 +20,8 @@ beforeEach(function () {
 
     Redis::connection()->del($store->key('john'));
     Redis::connection()->del($store->key('jane'));
+    Redis::connection()->del($store->penaltyKey('john'));
+    Redis::connection()->del($store->penaltyKey('jane'));
 });
 
 it('stores and returns hits', function () {
@@ -74,4 +76,20 @@ it('clears recorded hits by timestamp', function () {
         ->toBe([20])
         ->and($store->hits('jane'))
         ->toBe([10]);
+});
+
+it('records and reads penalties keeping the latest', function () {
+    $store = new RedisStore;
+
+    expect($store->penalizedUntil('john'))->toBeNull()
+        ->and($store->penaltyKey('john'))->toBe('http-client-rate-limits:john:penalty');
+
+    $store->penalizeUntil('john', 5_000);
+    expect($store->penalizedUntil('john'))->toBe(5_000);
+
+    $store->penalizeUntil('john', 4_000);
+    expect($store->penalizedUntil('john'))->toBe(5_000);
+
+    $store->penalizeUntil('john', 9_000);
+    expect($store->penalizedUntil('john'))->toBe(9_000);
 });

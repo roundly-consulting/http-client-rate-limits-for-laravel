@@ -79,9 +79,33 @@ class CacheStore implements Store
         });
     }
 
+    public function penalizeUntil(string $owner, int $timestamp): void
+    {
+        $current = $this->cache()->get($this->penaltyKey($owner));
+        $existing = is_numeric($current) ? (int) $current : 0;
+
+        $this->cache()->put(
+            $this->penaltyKey($owner),
+            max($existing, $timestamp),
+            $this->ttlSeconds,
+        );
+    }
+
+    public function penalizedUntil(string $owner): ?int
+    {
+        $value = $this->cache()->get($this->penaltyKey($owner));
+
+        return is_numeric($value) ? (int) $value : null;
+    }
+
     public function key(string $owner): string
     {
         return "{$this->prefix}:{$owner}";
+    }
+
+    public function penaltyKey(string $owner): string
+    {
+        return "{$this->prefix}:{$owner}:penalty";
     }
 
     /**

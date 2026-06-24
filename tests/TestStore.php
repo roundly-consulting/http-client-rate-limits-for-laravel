@@ -27,4 +27,14 @@ class TestStore implements Store
     {
         //
     }
+
+    public function penalizeUntil(string $owner, int $timestamp): void
+    {
+        //
+    }
+
+    public function penalizedUntil(string $owner): ?int
+    {
+        return null;
+    }
 }

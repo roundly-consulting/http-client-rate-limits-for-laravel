@@ -59,8 +59,31 @@ class RedisStore implements Store
             ->zremrangebyscore($this->key($owner), '0', (string) $timestamp);
     }
 
+    public function penalizeUntil(string $owner, int $timestamp): void
+    {
+        $connection = Redis::connection($this->connection);
+
+        $current = $connection->get($this->penaltyKey($owner));
+        $existing = is_numeric($current) ? (int) $current : 0;
+
+        $connection->set($this->penaltyKey($owner), (string) max($existing, $timestamp));
+        $connection->expire($this->penaltyKey($owner), self::RETENTION_SECONDS);
+    }
+
+    public function penalizedUntil(string $owner): ?int
+    {
+        $value = Redis::connection($this->connection)->get($this->penaltyKey($owner));
+
+        return is_numeric($value) ? (int) $value : null;
+    }
+
     public function key(string $owner): string
     {
         return "http-client-rate-limits:$owner";
+    }
+
+    public function penaltyKey(string $owner): string
+    {
+        return "http-client-rate-limits:$owner:penalty";
     }
 }

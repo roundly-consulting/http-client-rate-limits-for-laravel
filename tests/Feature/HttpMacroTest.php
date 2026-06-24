@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\Http;
+use RoundlyConsulting\HttpClientRateLimits\Facades\RateLimits;
 use RoundlyConsulting\HttpClientRateLimits\Limit;
 use RoundlyConsulting\HttpClientRateLimits\RateLimit;
 use RoundlyConsulting\HttpClientRateLimits\Store\InMemoryStore;
@@ -62,4 +63,30 @@ it('returns a response through the macro', function () {
     $response = Http::rateLimit(60)->get('https://api.example.com/things');
 
     expect($response->body())->toBe('ok');
+});
+
+it('resolves a named profile from a string', function () {
+    config()->set('http-client-rate-limits.limiters', [
+        'github' => ['rate' => 1, 'per' => 'minute', 'by' => 'gh'],
+    ]);
+
+    $store = RateLimits::fake()->store();
+
+    Http::rateLimit('github')->get('https://api.example.com/one');
+
+    expect($store->hits('gh'))->toHaveCount(1);
+});
+
+it('enforces compound windows from an array', function () {
+    $fake = RateLimits::fake();
+
+    Http::rateLimit([RateLimit::perSecond(5), RateLimit::perMinute(1)])
+        ->get('https://api.example.com/one');
+    Http::rateLimit([RateLimit::perSecond(5), RateLimit::perMinute(1)])
+        ->get('https://api.example.com/two');
+
+    // The per-minute window of 1 forces the second call to be deferred.
+    $fake->assertDeferred();
+
+    expect($fake->deferrer()->deferCount())->toBe(1);
 });

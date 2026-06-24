@@ -117,6 +117,59 @@ class RateLimit
         return $this->limiter;
     }
 
+    /**
+     * Enforce an additional window alongside the primary limit. Accepts a Limit,
+     * a RateLimit (its underlying limit is taken), or a list of either.
+     *
+     * @param  Limit|RateLimit|list<Limit|RateLimit>  $limit
+     */
+    public function alongside(Limit|RateLimit|array $limit): static
+    {
+        foreach (is_array($limit) ? $limit : [$limit] as $entry) {
+            $this->limiter->addLimit(
+                $entry instanceof RateLimit ? $entry->getLimiter()->getLimit() : $entry,
+            );
+        }
+
+        return $this;
+    }
+
+    public function maxWait(int $maxWaitMs): static
+    {
+        $this->limiter->getLimit()->maxWait($maxWaitMs);
+
+        return $this;
+    }
+
+    public function jitter(int $jitterMs): static
+    {
+        $this->limiter->getLimit()->jitter($jitterMs);
+
+        return $this;
+    }
+
+    public function adaptive(bool $adaptive = true): static
+    {
+        $this->limiter->getLimit()->adaptive($adaptive);
+
+        return $this;
+    }
+
+    public function remaining(): int
+    {
+        return $this->limiter->remaining();
+    }
+
+    public function availableIn(): int
+    {
+        return $this->limiter->availableIn();
+    }
+
+    public function tooManyAttempts(): bool
+    {
+        return $this->limiter->tooManyAttempts();
+    }
+
     public function by(string $key): static
     {
         $this->limiter->getLimit()->by($key);

@@ -23,10 +23,16 @@ final class HttpClientRateLimitsServiceProvider extends ServiceProvider
     {
         $this->registerMacro();
 
+        $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
+
         if ($this->app->runningInConsole()) {
             $this->publishes([
                 __DIR__.'/../config/http-client-rate-limits.php' => config_path('http-client-rate-limits.php'),
             ], 'http-client-rate-limits-config');
+
+            $this->publishes([
+                __DIR__.'/../database/migrations' => database_path('migrations'),
+            ], 'http-client-rate-limits-migrations');
         }
     }
 
@@ -40,10 +46,18 @@ final class HttpClientRateLimitsServiceProvider extends ServiceProvider
             return;
         }
 
-        PendingRequest::macro('rateLimit', function (RateLimit|Limit|int $limit, ?string $by = null): PendingRequest {
+        PendingRequest::macro('rateLimit', function (RateLimit|Limit|int|string|array $limit, ?string $by = null): PendingRequest {
+            // Resolve the manager per call so a swapped fake is honoured.
+            $manager = app(RateLimitManager::class);
+
             $middleware = match (true) {
                 $limit instanceof RateLimit => $limit,
                 $limit instanceof Limit => RateLimit::make($limit),
+                is_array($limit) => $manager->compound(array_values(array_filter(
+                    $limit,
+                    static fn (mixed $entry): bool => $entry instanceof Limit || $entry instanceof RateLimit,
+                ))),
+                is_string($limit) => $manager->profile($limit), // named profile
                 default => RateLimit::perMinute($limit), // int shorthand = per-minute
             };
 

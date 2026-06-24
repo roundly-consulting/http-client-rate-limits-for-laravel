@@ -5,32 +5,18 @@ declare(strict_types=1);
 namespace RoundlyConsulting\HttpClientRateLimits;
 
 use Closure;
-use InvalidArgumentException;
 use Psr\Http\Message\RequestInterface;
 use RoundlyConsulting\HttpClientRateLimits\Deferrer\Deferrer;
 use RoundlyConsulting\HttpClientRateLimits\Deferrer\SleepDeferrer;
+use RoundlyConsulting\HttpClientRateLimits\Enums\Timespan;
+use RoundlyConsulting\HttpClientRateLimits\Exceptions\InvalidDeferrerException;
+use RoundlyConsulting\HttpClientRateLimits\Exceptions\InvalidStoreException;
+use RoundlyConsulting\HttpClientRateLimits\Exceptions\UndefinedMethodException;
 use RoundlyConsulting\HttpClientRateLimits\Store\InMemoryStore;
 use RoundlyConsulting\HttpClientRateLimits\Store\RedisStore;
 use RoundlyConsulting\HttpClientRateLimits\Store\Store;
-use RuntimeException;
 
 /**
- * @method Limiter setLimit(Limit $limit)
- * @method Limiter setStore(Store $store)
- * @method Limiter setDeferrer(Deferrer $deferrer)
- * @method Limit getLimit()
- * @method Store getStore()
- * @method Deferrer getDeferrer()
- * @method int getMaxAttempts()
- * @method bool isOverMaxAttempts(int $attempt)
- * @method bool isUnderMaxAttempts(int $attempt)
- * @method Limit by(string $key)
- * @method string getKey()
- * @method string getTimespan()
- * @method int timespanLengthInMs()
- * @method mixed handle(callable $callback)
- * @method int delayUntilNextRequestInMs(int $at)
- *
  * @phpstan-consistent-constructor
  */
 class RateLimit
@@ -49,6 +35,18 @@ class RateLimit
 
     public static function make(Limit $limit): static
     {
+        // Prefer the container-bound manager (config-driven, overridable), but
+        // keep a static fallback so `RateLimit::*` still works without a container.
+        if (static::$defaultStore === null
+            && static::$defaultDeferrer === null
+            && function_exists('app')
+            && app()->bound(RateLimitManager::class)) {
+            /** @var RateLimit $rateLimit */
+            $rateLimit = app(RateLimitManager::class)->make($limit);
+
+            return new static($rateLimit->getLimiter());
+        }
+
         return new static(
             limiter: new Limiter(
                 limit: $limit,
@@ -63,9 +61,7 @@ class RateLimit
         $store = config('http-client-rate-limits.store', InMemoryStore::class);
 
         if (! is_string($store) || ! is_a($store, Store::class, true)) {
-            throw new InvalidArgumentException(
-                'Configured [http-client-rate-limits.store] must be a class implementing '.Store::class.'.',
-            );
+            throw InvalidStoreException::for($store);
         }
 
         if ($store === RedisStore::class) {
@@ -82,9 +78,7 @@ class RateLimit
         $deferrer = config('http-client-rate-limits.deferrer', SleepDeferrer::class);
 
         if (! is_string($deferrer) || ! is_a($deferrer, Deferrer::class, true)) {
-            throw new InvalidArgumentException(
-                'Configured [http-client-rate-limits.deferrer] must be a class implementing '.Deferrer::class.'.',
-            );
+            throw InvalidDeferrerException::for($deferrer);
         }
 
         return new $deferrer;
@@ -93,27 +87,100 @@ class RateLimit
     public static function perSecond(int $maxAttempts = 1): static
     {
         return static::make(
-            limit: new Limit(maxAttempts: $maxAttempts),
+            limit: new Limit(maxAttempts: $maxAttempts, timespan: Timespan::Second),
         );
     }
 
     public static function perMinute(int $maxAttempts = 1): static
     {
         return static::make(
-            limit: new Limit(maxAttempts: $maxAttempts, timespan: 'minute'),
+            limit: new Limit(maxAttempts: $maxAttempts, timespan: Timespan::Minute),
         );
     }
 
     public static function perHour(int $maxAttempts = 1): static
     {
         return static::make(
-            limit: new Limit(maxAttempts: $maxAttempts, timespan: 'hour'),
+            limit: new Limit(maxAttempts: $maxAttempts, timespan: Timespan::Hour),
+        );
+    }
+
+    public static function perDay(int $maxAttempts = 1): static
+    {
+        return static::make(
+            limit: new Limit(maxAttempts: $maxAttempts, timespan: Timespan::Day),
         );
     }
 
     public function getLimiter(): Limiter
     {
         return $this->limiter;
+    }
+
+    public function by(string $key): static
+    {
+        $this->limiter->getLimit()->by($key);
+
+        return $this;
+    }
+
+    public function getKey(): string
+    {
+        return $this->limiter->getLimit()->getKey();
+    }
+
+    public function getMaxAttempts(): int
+    {
+        return $this->limiter->getLimit()->getMaxAttempts();
+    }
+
+    public function isOverMaxAttempts(int $attempt): bool
+    {
+        return $this->limiter->getLimit()->isOverMaxAttempts($attempt);
+    }
+
+    public function isUnderMaxAttempts(int $attempt): bool
+    {
+        return $this->limiter->getLimit()->isUnderMaxAttempts($attempt);
+    }
+
+    public function getTimespan(): string
+    {
+        return $this->limiter->getLimit()->getTimespan();
+    }
+
+    public function getStore(): Store
+    {
+        return $this->limiter->getStore();
+    }
+
+    public function setStore(Store $store): static
+    {
+        $this->limiter->setStore($store);
+
+        return $this;
+    }
+
+    public function getDeferrer(): Deferrer
+    {
+        return $this->limiter->getDeferrer();
+    }
+
+    public function setDeferrer(Deferrer $deferrer): static
+    {
+        $this->limiter->setDeferrer($deferrer);
+
+        return $this;
+    }
+
+    public function delayUntilNextRequestInMs(int $at): int
+    {
+        return $this->limiter->delayUntilNextRequestInMs($at);
+    }
+
+    public function handle(callable $callback): mixed
+    {
+        return $this->limiter->handle($callback);
     }
 
     public function __invoke(callable $handler): Closure
@@ -136,6 +203,6 @@ class RateLimit
             return $this->limiter->$name(...$arguments);
         }
 
-        throw new RuntimeException("Method [{$name}] not found on RateLimit or Limiter class.");
+        throw UndefinedMethodException::for($name);
     }
 }

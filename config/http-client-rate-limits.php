@@ -14,13 +14,29 @@ return [
     |
     | The Store implementation used to record request timestamps for every
     | RateLimit created with RateLimit::make()/perSecond()/perMinute()/perHour().
-    | Ship with the in-process InMemoryStore, or switch to the RedisStore to
-    | share limits across processes and servers. Must implement the
+    | Ship with the in-process InMemoryStore, the CacheStore (shares limits via
+    | any cache store the app already runs), or the RedisStore (strictly atomic,
+    | shared across processes and servers). Must implement the
     | RoundlyConsulting\HttpClientRateLimits\Store\Store contract.
     |
     */
 
     'store' => env('HTTP_CLIENT_RATE_LIMITS_STORE', InMemoryStore::class),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Cache Store Settings
+    |--------------------------------------------------------------------------
+    |
+    | Used only when the store above is the CacheStore. "cache_store" is the
+    | cache store name from config/cache.php (null = the default store) and
+    | "cache_prefix" namespaces the cache keys the package writes.
+    |
+    */
+
+    'cache_store' => env('HTTP_CLIENT_RATE_LIMITS_CACHE_STORE'),
+
+    'cache_prefix' => env('HTTP_CLIENT_RATE_LIMITS_CACHE_PREFIX', 'http-client-rate-limits'),
 
     /*
     |--------------------------------------------------------------------------
@@ -47,5 +63,18 @@ return [
     */
 
     'redis_connection' => env('HTTP_CLIENT_RATE_LIMITS_REDIS_CONNECTION', 'default'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Events
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, the limiter dispatches RequestDeferred (a request was paused)
+    | and RequestAllowed (a request was recorded) so you can log, meter, or alert
+    | on throttling. Turn off for the lowest possible overhead.
+    |
+    */
+
+    'events_enabled' => env('HTTP_CLIENT_RATE_LIMITS_EVENTS_ENABLED', true),
 
 ];

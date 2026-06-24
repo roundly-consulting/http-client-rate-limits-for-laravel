@@ -4,33 +4,45 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\HttpClientRateLimits;
 
+use RoundlyConsulting\HttpClientRateLimits\Enums\Timespan;
+
 class Limit
 {
+    protected Timespan $timespan;
+
     public function __construct(
         protected string $key = 'global',
         protected int $maxAttempts = 60,
-        protected string $timespan = 'second',
-    ) {}
+        Timespan|string $timespan = Timespan::Second,
+        protected bool $trim = false,
+    ) {
+        $this->timespan = $this->normalizeTimespan($timespan);
+    }
 
     public function perSecond(int $maxAttempts): self
     {
-        return $this->maxAttempts($maxAttempts);
+        return $this->maxAttempts($maxAttempts, Timespan::Second);
     }
 
     public function perMinute(int $maxAttempts): self
     {
-        return $this->maxAttempts($maxAttempts, 'minute');
+        return $this->maxAttempts($maxAttempts, Timespan::Minute);
     }
 
     public function perHour(int $maxAttempts): self
     {
-        return $this->maxAttempts($maxAttempts, 'hour');
+        return $this->maxAttempts($maxAttempts, Timespan::Hour);
     }
 
-    public function maxAttempts(int $maxAttempts, string $timespan = 'second'): self
+    public function perDay(int $maxAttempts): self
+    {
+        return $this->maxAttempts($maxAttempts, Timespan::Day);
+    }
+
+    public function maxAttempts(int $maxAttempts, Timespan|string $timespan = Timespan::Second): self
     {
         $this->maxAttempts = $maxAttempts;
-        $this->timespan = $timespan;
+        $this->timespan = $this->normalizeTimespan($timespan);
 
         return $this;
     }
@@ -62,17 +74,37 @@ class Limit
         return $this->key;
     }
 
+    public function trim(bool $trim = true): self
+    {
+        $this->trim = $trim;
+
+        return $this;
+    }
+
+    public function shouldTrim(): bool
+    {
+        return $this->trim;
+    }
+
     public function getTimespan(): string
+    {
+        return $this->timespan->value;
+    }
+
+    public function getTimespanEnum(): Timespan
     {
         return $this->timespan;
     }
 
     public function timespanLengthInMs(): int
     {
-        return match ($this->timespan) {
-            'hour' => 60 * 60 * 1000,
-            'minute' => 60 * 1000,
-            default => 1000,
-        };
+        return $this->timespan->lengthInMs();
+    }
+
+    protected function normalizeTimespan(Timespan|string $timespan): Timespan
+    {
+        return $timespan instanceof Timespan
+            ? $timespan
+            : Timespan::fromValue($timespan);
     }
 }

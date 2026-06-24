@@ -116,6 +116,38 @@ it('returns delay until next request in ms', function () {
         ->toBe(30000);
 });
 
+it('keeps the store bounded to the active window when trimming is enabled', function () {
+    $store = new InMemoryStore;
+
+    $limit = (new Limit(maxAttempts: 100, timespan: 'second'))->trim();
+
+    $limiter = new Limiter(limit: $limit, store: $store, deferrer: new TestDeferrer(1_000_000));
+
+    // Pre-seed an old hit far outside the 1-second window.
+    $store->hit('global', 0);
+
+    $limiter->handle(fn () => null);
+
+    expect($store->hits('global'))->toBe([1_000_000])
+        ->and($limit->shouldTrim())->toBeTrue();
+});
+
+it('does not trim when trimming is disabled by default', function () {
+    $store = new InMemoryStore;
+
+    $limiter = new Limiter(
+        limit: new Limit(maxAttempts: 100, timespan: 'second'),
+        store: $store,
+        deferrer: new TestDeferrer(1_000_000),
+    );
+
+    $store->hit('global', 0);
+
+    $limiter->handle(fn () => null);
+
+    expect($store->hits('global'))->toBe([0, 1_000_000]);
+});
+
 it('records hit to store and executes callback', function () {
     $limiter = new Limiter(
         limit: new Limit(maxAttempts: 1, timespan: 'minute'),

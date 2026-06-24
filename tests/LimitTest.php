@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use RoundlyConsulting\HttpClientRateLimits\Enums\Timespan;
+use RoundlyConsulting\HttpClientRateLimits\Exceptions\InvalidTimespanException;
 use RoundlyConsulting\HttpClientRateLimits\Limit;
 
 it('sets max attempts per second', function () {
@@ -53,6 +55,17 @@ it('sets key of limit', function () {
         ->getKey()->toBe('john');
 });
 
+it('sets max attempts per day', function () {
+    $limit = new Limit;
+
+    $limit->perDay(1_000);
+
+    expect($limit)
+        ->getMaxAttempts()->toBe(1_000)
+        ->getTimespan()->toBe('day')
+        ->getTimespanEnum()->toBe(Timespan::Day);
+});
+
 it('returns timespan length in ms for specific timespan', function () {
     $limit = new Limit;
 
@@ -64,6 +77,28 @@ it('returns timespan length in ms for specific timespan', function () {
 
     $limit->perHour(1);
     expect($limit->timespanLengthInMs())->toBe(3_600_000);
+
+    $limit->perDay(1);
+    expect($limit->timespanLengthInMs())->toBe(86_400_000);
+});
+
+it('accepts a timespan enum in the constructor', function () {
+    $limit = new Limit(maxAttempts: 5, timespan: Timespan::Hour);
+
+    expect($limit->getTimespanEnum())->toBe(Timespan::Hour)
+        ->and($limit->getTimespan())->toBe('hour');
+});
+
+it('throws a typed exception for an unknown timespan string', function () {
+    new Limit(timespan: 'decade');
+})->throws(InvalidTimespanException::class);
+
+it('toggles the trim flag', function () {
+    $limit = new Limit;
+
+    expect($limit->shouldTrim())->toBeFalse()
+        ->and($limit->trim()->shouldTrim())->toBeTrue()
+        ->and($limit->trim(false)->shouldTrim())->toBeFalse();
 });
 
 it('checks whether attempt is under or above max attempts', function () {

@@ -101,6 +101,37 @@ it('toggles the trim flag', function () {
         ->and($limit->trim(false)->shouldTrim())->toBeFalse();
 });
 
+it('sets and reports a max wait ceiling', function () {
+    $limit = new Limit;
+
+    expect($limit->hasMaxWait())->toBeFalse()
+        ->and($limit->getMaxWait())->toBeNull()
+        ->and($limit->exceedsMaxWait(10_000))->toBeFalse();
+
+    $limit->maxWait(5_000);
+
+    expect($limit->hasMaxWait())->toBeTrue()
+        ->and($limit->getMaxWait())->toBe(5_000)
+        ->and($limit->exceedsMaxWait(5_001))->toBeTrue()
+        ->and($limit->exceedsMaxWait(5_000))->toBeFalse();
+});
+
+it('sets jitter and clamps negatives to zero', function () {
+    $limit = new Limit;
+
+    expect($limit->getJitter())->toBe(0)
+        ->and($limit->jitter(50)->getJitter())->toBe(50)
+        ->and($limit->jitter(-5)->getJitter())->toBe(0);
+});
+
+it('toggles the adaptive flag', function () {
+    $limit = new Limit;
+
+    expect($limit->isAdaptive())->toBeFalse()
+        ->and($limit->adaptive()->isAdaptive())->toBeTrue()
+        ->and($limit->adaptive(false)->isAdaptive())->toBeFalse();
+});
+
 it('checks whether attempt is under or above max attempts', function () {
     $limit = new Limit(maxAttempts: 5);
 

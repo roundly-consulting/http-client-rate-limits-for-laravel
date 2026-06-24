@@ -10,6 +10,15 @@ class Limit
 {
     protected Timespan $timespan;
 
+    /** Maximum defer (ms) before failing fast, or null for no ceiling. */
+    protected ?int $maxWaitMs = null;
+
+    /** Random jitter (ms) added to/subtracted from defers, 0 disables it. */
+    protected int $jitterMs = 0;
+
+    /** Whether to self-tune from rate-limit response headers. */
+    protected bool $adaptive = false;
+
     public function __construct(
         protected string $key = 'global',
         protected int $maxAttempts = 60,
@@ -84,6 +93,52 @@ class Limit
     public function shouldTrim(): bool
     {
         return $this->trim;
+    }
+
+    public function maxWait(int $maxWaitMs): self
+    {
+        $this->maxWaitMs = $maxWaitMs;
+
+        return $this;
+    }
+
+    public function getMaxWait(): ?int
+    {
+        return $this->maxWaitMs;
+    }
+
+    public function hasMaxWait(): bool
+    {
+        return $this->maxWaitMs !== null;
+    }
+
+    public function exceedsMaxWait(int $delayMs): bool
+    {
+        return $this->maxWaitMs !== null && $delayMs > $this->maxWaitMs;
+    }
+
+    public function jitter(int $jitterMs): self
+    {
+        $this->jitterMs = max(0, $jitterMs);
+
+        return $this;
+    }
+
+    public function getJitter(): int
+    {
+        return $this->jitterMs;
+    }
+
+    public function adaptive(bool $adaptive = true): self
+    {
+        $this->adaptive = $adaptive;
+
+        return $this;
+    }
+
+    public function isAdaptive(): bool
+    {
+        return $this->adaptive;
     }
 
     public function getTimespan(): string

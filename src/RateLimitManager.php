@@ -5,12 +5,15 @@ declare(strict_types=1);
 namespace RoundlyConsulting\HttpClientRateLimits;
 
 use Illuminate\Contracts\Config\Repository;
+use RoundlyConsulting\HttpClientRateLimits\DataTransferObjects\LimiterProfileData;
 use RoundlyConsulting\HttpClientRateLimits\Deferrer\Deferrer;
 use RoundlyConsulting\HttpClientRateLimits\Deferrer\SleepDeferrer;
 use RoundlyConsulting\HttpClientRateLimits\Enums\Timespan;
 use RoundlyConsulting\HttpClientRateLimits\Exceptions\InvalidDeferrerException;
 use RoundlyConsulting\HttpClientRateLimits\Exceptions\InvalidStoreException;
+use RoundlyConsulting\HttpClientRateLimits\Exceptions\UnknownLimiterProfileException;
 use RoundlyConsulting\HttpClientRateLimits\Store\CacheStore;
+use RoundlyConsulting\HttpClientRateLimits\Store\DatabaseStore;
 use RoundlyConsulting\HttpClientRateLimits\Store\InMemoryStore;
 use RoundlyConsulting\HttpClientRateLimits\Store\RedisStore;
 use RoundlyConsulting\HttpClientRateLimits\Store\Store;
@@ -19,7 +22,7 @@ use RoundlyConsulting\HttpClientRateLimits\Store\Store;
  * Resolves the configured store/deferrer and builds RateLimit middleware. Bound
  * as a singleton so a facade can resolve it and the host can override defaults.
  */
-final class RateLimitManager
+class RateLimitManager
 {
     private ?Store $store = null;
 
@@ -55,6 +58,48 @@ final class RateLimitManager
         );
     }
 
+    /**
+     * Build a RateLimit from a named profile defined under the [limiters] config key.
+     */
+    public function profile(string $name): RateLimit
+    {
+        $limiters = $this->config->get('http-client-rate-limits.limiters', []);
+
+        if (! is_array($limiters) || ! array_key_exists($name, $limiters) || ! is_array($limiters[$name])) {
+            throw UnknownLimiterProfileException::for($name);
+        }
+
+        /** @var array<string, mixed> $profileConfig */
+        $profileConfig = $limiters[$name];
+
+        return $this->make(LimiterProfileData::fromConfig($profileConfig)->toLimit());
+    }
+
+    /**
+     * Build a RateLimit that enforces several windows at once (the strictest wins).
+     *
+     * @param  list<Limit|RateLimit>  $limits
+     */
+    public function compound(array $limits): RateLimit
+    {
+        $resolved = array_map(
+            static fn (Limit|RateLimit $limit): Limit => $limit instanceof RateLimit
+                ? $limit->getLimiter()->getLimit()
+                : $limit,
+            $limits,
+        );
+
+        $primary = $resolved[0] ?? new Limit;
+
+        $rateLimit = $this->make($primary);
+
+        foreach (array_slice($resolved, 1) as $additional) {
+            $rateLimit->getLimiter()->addLimit($additional);
+        }
+
+        return $rateLimit;
+    }
+
     public function perSecond(int $maxAttempts = 1): RateLimit
     {
         return $this->make(new Limit(maxAttempts: $maxAttempts, timespan: Timespan::Second));
@@ -87,6 +132,10 @@ final class RateLimitManager
             $connection = $this->config->get('http-client-rate-limits.redis_connection', 'default');
 
             return new RedisStore(is_string($connection) ? $connection : 'default');
+        }
+
+        if ($store === DatabaseStore::class) {
+            return new DatabaseStore;
         }
 
         if ($store === CacheStore::class) {

@@ -9,6 +9,24 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Named Limiter Profiles
+    |--------------------------------------------------------------------------
+    |
+    | Reusable, named limits you can reference by string instead of rebuilding
+    | them at every call site: Http::rateLimit('github')->get(...). Each profile
+    | is an array with: "rate" (int), "per" (second|minute|hour|day), and the
+    | optional "by", "trim" (bool), "max_wait" (ms), "jitter" (ms), and
+    | "adaptive" (bool) keys. Referencing an undefined name throws
+    | UnknownLimiterProfileException.
+    |
+    */
+
+    'limiters' => [
+        // 'github' => ['rate' => 5, 'per' => 'second', 'by' => null],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Default Store
     |--------------------------------------------------------------------------
     |

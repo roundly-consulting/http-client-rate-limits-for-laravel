@@ -5,9 +5,12 @@ declare(strict_types=1);
 use RoundlyConsulting\HttpClientRateLimits\Deferrer\SleepDeferrer;
 use RoundlyConsulting\HttpClientRateLimits\Exceptions\InvalidDeferrerException;
 use RoundlyConsulting\HttpClientRateLimits\Exceptions\InvalidStoreException;
+use RoundlyConsulting\HttpClientRateLimits\Exceptions\UnknownLimiterProfileException;
+use RoundlyConsulting\HttpClientRateLimits\Limit;
 use RoundlyConsulting\HttpClientRateLimits\RateLimit;
 use RoundlyConsulting\HttpClientRateLimits\RateLimitManager;
 use RoundlyConsulting\HttpClientRateLimits\Store\CacheStore;
+use RoundlyConsulting\HttpClientRateLimits\Store\DatabaseStore;
 use RoundlyConsulting\HttpClientRateLimits\Store\InMemoryStore;
 use RoundlyConsulting\HttpClientRateLimits\Store\RedisStore;
 use RoundlyConsulting\HttpClientRateLimits\Tests\TestDeferrer;
@@ -74,3 +77,51 @@ it('throws when the configured deferrer is invalid', function () {
 
     app(RateLimitManager::class)->perMinute(5);
 })->throws(InvalidDeferrerException::class);
+
+it('resolves a database store from config', function () {
+    config()->set('http-client-rate-limits.store', DatabaseStore::class);
+
+    expect(app(RateLimitManager::class)->perMinute(5)->getStore())
+        ->toBeInstanceOf(DatabaseStore::class);
+});
+
+it('builds a rate limit from a named profile', function () {
+    config()->set('http-client-rate-limits.limiters', [
+        'github' => ['rate' => 5, 'per' => 'second', 'by' => 'gh'],
+    ]);
+
+    $rateLimit = app(RateLimitManager::class)->profile('github');
+
+    expect($rateLimit)->toBeInstanceOf(RateLimit::class)
+        ->getMaxAttempts()->toBe(5)
+        ->getTimespan()->toBe('second')
+        ->getKey()->toBe('gh');
+});
+
+it('throws for an unknown profile name', function () {
+    config()->set('http-client-rate-limits.limiters', []);
+
+    app(RateLimitManager::class)->profile('missing');
+})->throws(UnknownLimiterProfileException::class);
+
+it('throws when the profile config is not an array', function () {
+    config()->set('http-client-rate-limits.limiters', ['bad' => 'nope']);
+
+    app(RateLimitManager::class)->profile('bad');
+})->throws(UnknownLimiterProfileException::class);
+
+it('builds a compound rate limit from limits and rate limits', function () {
+    $rateLimit = app(RateLimitManager::class)->compound([
+        new Limit(maxAttempts: 5, timespan: 'second'),
+        RateLimit::perMinute(100),
+    ]);
+
+    expect($rateLimit->getLimiter()->getLimits())->toHaveCount(2)
+        ->and($rateLimit->getLimiter()->getLimit()->getTimespan())->toBe('second');
+});
+
+it('builds a compound rate limit defaulting to a global limit when empty', function () {
+    $rateLimit = app(RateLimitManager::class)->compound([]);
+
+    expect($rateLimit->getLimiter()->getLimits())->toHaveCount(1);
+});

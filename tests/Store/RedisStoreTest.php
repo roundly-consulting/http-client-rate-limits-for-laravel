@@ -52,6 +52,14 @@ it('returns hits since given timestamp', function () {
         ->toBe([15, 20]);
 });
 
+it('sets a bounded ttl on the key when recording a hit', function () {
+    $store = new RedisStore;
+
+    $store->hit('john', now()->getTimestampMs());
+
+    expect(Redis::connection()->ttl($store->key('john')))->toBeGreaterThan(0);
+});
+
 it('clears recorded hits by timestamp', function () {
     $store = new RedisStore;
 

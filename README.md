@@ -448,6 +448,25 @@ $fake->assertAllowed();            // at least one request went through
 `assertAllowed(?string $key)`, `assertNothingDeferred()`, and the shared `store()` /
 `deferrer()` for finer-grained assertions.
 
+## Integrates with
+
+- **[enums-for-laravel](https://github.com/roundly-consulting/enums-for-laravel)** — the
+  `Timespan` enum uses the shared `RoundlyConsulting\Enums\Helpers` trait, so it exposes the
+  full enum toolkit alongside its domain methods (`fromValue()`, `lengthInMs()`):
+
+  ```php
+  use RoundlyConsulting\HttpClientRateLimits\Enums\Timespan;
+
+  Timespan::values();          // ['second', 'minute', 'hour', 'day']
+  Timespan::labels();          // ['Second', 'Minute', 'Hour', 'Day']
+  Timespan::options();         // list of {value, label, name} option DTOs
+  Timespan::toOptions();       // value => label map for <select> inputs
+  Timespan::validationRule();  // 'in:second,minute,hour,day'
+
+  Timespan::Hour->label();     // 'Hour'
+  Timespan::fromName('Hour');  // Timespan::Hour
+  ```
+
 ## Testing
 
 ```bash

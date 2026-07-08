@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\HttpClientRateLimits\Enums;
 
+use RoundlyConsulting\Enums\Helpers;
 use RoundlyConsulting\HttpClientRateLimits\Exceptions\InvalidTimespanException;
 
 enum Timespan: string
 {
+    use Helpers;
+
     case Second = 'second';
     case Minute = 'minute';
     case Hour = 'hour';

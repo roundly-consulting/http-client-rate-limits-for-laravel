@@ -40,7 +40,13 @@ it('publishes the migrations under the http-client-rate-limits-migrations tag', 
     );
 
     expect($paths)->toHaveCount(1)
-        ->and(array_keys($paths)[0])->toEndWith('database/migrations');
+        ->and(array_keys($paths)[0])->toEndWith('database/migrations/2026_06_24_000000_create_http_client_rate_limits_table.php')
+        ->and(array_values($paths)[0])->toMatch('#/database/migrations/\d{4}_\d{2}_\d{2}_\d{6}_create_http_client_rate_limits_table\.php$#');
+});
+
+it('does not load the migration automatically', function (): void {
+    expect(app('migrator')->paths())
+        ->not->toContain(realpath(__DIR__.'/../../database/migrations'));
 });
 
 it('contributes a section to the about command', function (): void {

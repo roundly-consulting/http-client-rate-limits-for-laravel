@@ -68,6 +68,11 @@ php artisan vendor:publish --tag="http-client-rate-limits-migrations"
 php artisan migrate
 ```
 
+The migration is **not** loaded automatically — `php artisan migrate` only creates the
+`http_client_rate_limits` table once you have published it into your app's
+`database/migrations`. Publishing again is idempotent: it overwrites the file it already
+placed instead of adding a second copy.
+
 ## Configuration
 
 The published file lives at `config/http-client-rate-limits.php`:
@@ -468,7 +473,7 @@ $fake->assertAllowed();            // at least one request went through
   ```
 
 - **[package-toolkit-for-laravel](https://github.com/roundly-consulting/package-toolkit-for-laravel)** —
-  bootstraps the service provider (config merge/publish, migration loading/publishing) and adds a
+  bootstraps the service provider (config merge/publish, migration publishing) and adds a
   `php artisan about` section reporting the active store, deferrer, limiter-profile count, and
   whether events are enabled:
 

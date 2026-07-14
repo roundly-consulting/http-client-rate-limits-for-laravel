@@ -467,6 +467,15 @@ $fake->assertAllowed();            // at least one request went through
   Timespan::fromName('Hour');  // Timespan::Hour
   ```
 
+- **[package-toolkit-for-laravel](https://github.com/roundly-consulting/package-toolkit-for-laravel)** —
+  bootstraps the service provider (config merge/publish, migration loading/publishing) and adds a
+  `php artisan about` section reporting the active store, deferrer, limiter-profile count, and
+  whether events are enabled:
+
+  ```bash
+  php artisan about --only=http-client-rate-limits
+  ```
+
 ## Testing
 
 ```bash

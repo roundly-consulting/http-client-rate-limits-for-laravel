@@ -5,35 +5,42 @@ declare(strict_types=1);
 namespace RoundlyConsulting\HttpClientRateLimits;
 
 use Illuminate\Http\Client\PendingRequest;
-use Illuminate\Support\ServiceProvider;
+use RoundlyConsulting\PackageToolkit\Package;
+use RoundlyConsulting\PackageToolkit\PackageServiceProvider;
 
-final class HttpClientRateLimitsServiceProvider extends ServiceProvider
+final class HttpClientRateLimitsServiceProvider extends PackageServiceProvider
 {
+    public function configurePackage(Package $package): void
+    {
+        $package
+            ->name('http-client-rate-limits')
+            ->hasConfigFile()
+            ->hasMigrations()
+            ->contributesToAbout(static function (): array {
+                /** @var array<string, mixed> $limiters */
+                $limiters = config('http-client-rate-limits.limiters', []);
+
+                return [
+                    'Store' => self::classLabel(config('http-client-rate-limits.store')),
+                    'Deferrer' => self::classLabel(config('http-client-rate-limits.deferrer')),
+                    'Limiter profiles' => (string) count($limiters),
+                    'Events' => config('http-client-rate-limits.events_enabled') === false ? 'OFF' : 'ENABLED',
+                ];
+            });
+    }
+
     public function register(): void
     {
-        $this->mergeConfigFrom(
-            __DIR__.'/../config/http-client-rate-limits.php',
-            'http-client-rate-limits',
-        );
+        parent::register();
 
         $this->app->singleton(RateLimitManager::class);
     }
 
     public function boot(): void
     {
+        parent::boot();
+
         $this->registerMacro();
-
-        $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
-
-        if ($this->app->runningInConsole()) {
-            $this->publishes([
-                __DIR__.'/../config/http-client-rate-limits.php' => config_path('http-client-rate-limits.php'),
-            ], 'http-client-rate-limits-config');
-
-            $this->publishes([
-                __DIR__.'/../database/migrations' => database_path('migrations'),
-            ], 'http-client-rate-limits-migrations');
-        }
     }
 
     /**
@@ -68,5 +75,13 @@ final class HttpClientRateLimitsServiceProvider extends ServiceProvider
             /** @var PendingRequest $this */
             return $this->withMiddleware($middleware);
         });
+    }
+
+    /**
+     * The short class name of a configured implementation, for `php artisan about`.
+     */
+    private static function classLabel(mixed $value): string
+    {
+        return is_string($value) && $value !== '' ? class_basename($value) : 'default';
     }
 }

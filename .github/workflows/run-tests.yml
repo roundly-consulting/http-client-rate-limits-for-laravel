@@ -57,3 +57,71 @@ jobs:
         env:
           REDIS_HOST: 127.0.0.1
           REDIS_PORT: 6379
+
+  test-pgsql:
+    runs-on: ubuntu-latest
+    name: P8.4 - pgsql real-engine
+
+    # Both services, not just postgres: the RedisStore cases gate on a reachable Redis, so
+    # a postgres-only leg would run a materially smaller suite than the matrix beside it and
+    # report a healthy green over a pile of new skips.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: testing
+          POSTGRES_USER: testing
+          POSTGRES_PASSWORD: secret
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: 8.4
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, bcmath, intl, fileinfo, redis, pdo, sqlite, pdo_sqlite, pgsql, pdo_pgsql
+          coverage: none
+
+      - name: Install dependencies
+        env:
+          COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ secrets.COMPOSER_AUTH_TOKEN }}"}}'
+        run: composer update --prefer-stable --prefer-dist --no-interaction
+
+      - name: Execute tests against postgres
+        env:
+          # TESTING_DB_DRIVER is what moves the suite off sqlite. The TESTING_DB_* location
+          # vars alone only say where the engine is: without the driver this job would run
+          # every test on sqlite and call itself a postgres leg.
+          #
+          # For this package the leg is what puts the DatabaseStore in front of a real
+          # engine for the first time — including the two millisecond-epoch columns, which
+          # sqlite reports as plain `integer` whether they are 32- or 64-bit.
+          TESTING_DB_DRIVER: pgsql
+          TESTING_DB_HOST: 127.0.0.1
+          TESTING_DB_PORT: 5432
+          TESTING_DB_DATABASE: testing
+          TESTING_DB_USERNAME: testing
+          TESTING_DB_PASSWORD: secret
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: 6379
+        # Coverage is enforced on the sqlite matrix; this is a correctness leg, and
+        # re-measuring it doubles the slowest job for no signal.
+        run: vendor/bin/pest --ci

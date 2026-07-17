@@ -4,30 +4,31 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\HttpClientRateLimits\Tests;
 
-use Orchestra\Testbench\TestCase as Orchestra;
+use Illuminate\Support\ServiceProvider;
 use RoundlyConsulting\HttpClientRateLimits\HttpClientRateLimitsServiceProvider;
+use RoundlyConsulting\Testing\PackageTestCase;
 
-abstract class TestCase extends Orchestra
+abstract class TestCase extends PackageTestCase
 {
     /**
-     * @return array<int, class-string>
+     * Every provider this package hard-requires, in registration order. A host
+     * auto-discovers these; the suite must list them or the test environment is a fiction.
+     *
+     * @return list<class-string<ServiceProvider>>
      */
-    protected function getPackageProviders($app): array
+    protected function packageProviders(): array
     {
         return [HttpClientRateLimitsServiceProvider::class];
     }
 
-    protected function getEnvironmentSetUp($app): void
-    {
-        config()->set('database.default', 'testing');
-    }
-
     /**
-     * The package publishes its migrations rather than auto-loading them,
-     * so the suite has to run them explicitly.
+     * The single hits migration, named by provider class (never by filename). The package
+     * publishes rather than auto-loads it, so the suite has to run it explicitly.
+     *
+     * @return list<class-string<ServiceProvider>|string>
      */
-    protected function defineDatabaseMigrations(): void
+    protected function migrationSources(): array
     {
-        $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
+        return [HttpClientRateLimitsServiceProvider::class];
     }
 }

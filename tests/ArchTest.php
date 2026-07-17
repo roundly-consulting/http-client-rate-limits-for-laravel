@@ -86,6 +86,16 @@ ArchPresets::noLocalCryptoPrimitives('RoundlyConsulting\HttpClientRateLimits', [
 ]);
 
 /**
+ * The morph-key seam, guarded. This package has NO polymorphic columns — its one table
+ * (`http_client_rate_limits`) keys hits by a plain string limit key, not a morph — so the pin
+ * scans real migration files and finds no raw `$table->morphs()`, which is the correct green.
+ * It is non-vacuous by construction: the directory exists and holds a scannable migration, so a
+ * future raw morph added here would red. Adopted as a standing guard, not because a morph exists
+ * today.
+ */
+ArchPresets::morphColumnsUseTheSeam(__DIR__.'/../database/migrations');
+
+/**
  * The Dependency Policy as a test. No `alsoAllow`: this package's `require` ships only
  * php/illuminate/roundly, and the workflow installs test tooling with `--dev`, so nothing
  * legitimately lands in `require` that this must forgive. If it goes red, the graph is

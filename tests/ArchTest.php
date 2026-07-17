@@ -32,9 +32,24 @@ ArchPresets::strictTypes('RoundlyConsulting\HttpClientRateLimits');
  * anywhere in src/ or tests/, and none is an extension point by design: a host adds a store
  * by IMPLEMENTING the Store contract that `http-client-rate-limits.store` binds, never by
  * extending a shipped one. They are final as of this row.
+ *
+ * The list goes through the `$ignoring` PARAMETER rather than Pest's fluent `->ignoring()`,
+ * which buys two checks the fluent form cannot give:
+ *
+ *  - it is ROT-CHECKED. `::class` resolves to a string at compile time, so a rename would
+ *    otherwise leave a green exemption silencing nothing while the ban quietly applies to a
+ *    class everyone believes is exempt;
+ *  - it recovers the SHADOW. Pest matches exemptions by string PREFIX, not class identity
+ *    (pest-plugin-arch Blueprint.php:103), so an exemption also silences every class whose
+ *    FQCN starts with it. Through the parameter, `finalByDefault` re-checks those by
+ *    reflection. Measured here: this list shadows nothing — `RateLimitExceededException`
+ *    diverges from `RateLimitException` at `Exce|eded`/`Exce|ption`, so it is policed
+ *    normally — but the guard now stands if a `RateLimitManagerFoo` is ever added.
  */
-ArchPresets::finalByDefault('RoundlyConsulting\HttpClientRateLimits')
-    ->ignoring([RateLimitManager::class, RateLimitException::class]);
+ArchPresets::finalByDefault('RoundlyConsulting\HttpClientRateLimits', [
+    RateLimitManager::class,
+    RateLimitException::class,
+]);
 
 /**
  * No swappable models: `http-client-rate-limits.store` and `.deferrer` bind driver
@@ -59,9 +74,16 @@ ArchPresets::finalByDefault('RoundlyConsulting\HttpClientRateLimits')
  * because the randomness is already isolated behind the `Randomizer` contract (tests inject
  * a deterministic one) — which is the shape the ban wants anyway. Any second use of a
  * primitive elsewhere in the package still goes red.
+ *
+ * Through the `$ignoring` parameter, so it is rot-checked: if `RandomRandomizer` is ever
+ * renamed or folded into another class, this fails as stale rather than silently exempting
+ * nothing and re-banning `random_int` where the jitter actually lives. This is the second
+ * of the two exemption lists in this file — each pin is registered under its own preset's
+ * description, which is what lets them coexist.
  */
-ArchPresets::noLocalCryptoPrimitives('RoundlyConsulting\HttpClientRateLimits')
-    ->ignoring(RandomRandomizer::class);
+ArchPresets::noLocalCryptoPrimitives('RoundlyConsulting\HttpClientRateLimits', [
+    RandomRandomizer::class,
+]);
 
 /**
  * The Dependency Policy as a test. No `alsoAllow`: this package's `require` ships only

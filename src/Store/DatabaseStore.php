@@ -12,7 +12,7 @@ use RoundlyConsulting\HttpClientRateLimits\Models\RateLimitHit;
  * file/database cache and have no Redis. Backed by Eloquent (never the DB facade)
  * so it honours the host's configured connection.
  */
-class DatabaseStore implements Store
+final class DatabaseStore implements Store
 {
     public function hit(string $owner, int $timestamp): void
     {

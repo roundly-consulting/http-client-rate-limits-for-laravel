@@ -6,7 +6,7 @@ namespace RoundlyConsulting\HttpClientRateLimits;
 
 use RoundlyConsulting\HttpClientRateLimits\Enums\Timespan;
 
-class Limit
+final class Limit
 {
     protected Timespan $timespan;
 

@@ -6,7 +6,7 @@ namespace RoundlyConsulting\HttpClientRateLimits\Store;
 
 use Illuminate\Support\Facades\Redis;
 
-class RedisStore implements Store
+final class RedisStore implements Store
 {
     /** One day (the largest supported window) plus a generous margin, in seconds. */
     protected const RETENTION_SECONDS = 86_400 + 3_600;

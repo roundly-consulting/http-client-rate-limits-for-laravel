@@ -19,7 +19,7 @@ use RoundlyConsulting\HttpClientRateLimits\Store\Store;
 /**
  * @phpstan-consistent-constructor
  */
-class RateLimit
+final class RateLimit
 {
     protected static ?Store $defaultStore = null;
 
@@ -29,29 +29,29 @@ class RateLimit
 
     public static function use(?Store $defaultStore = null, ?Deferrer $defaultDeferrer = null): void
     {
-        static::$defaultStore = $defaultStore;
-        static::$defaultDeferrer = $defaultDeferrer;
+        self::$defaultStore = $defaultStore;
+        self::$defaultDeferrer = $defaultDeferrer;
     }
 
     public static function make(Limit $limit): static
     {
         // Prefer the container-bound manager (config-driven, overridable), but
         // keep a static fallback so `RateLimit::*` still works without a container.
-        if (static::$defaultStore === null
-            && static::$defaultDeferrer === null
+        if (self::$defaultStore === null
+            && self::$defaultDeferrer === null
             && function_exists('app')
             && app()->bound(RateLimitManager::class)) {
             /** @var RateLimit $rateLimit */
             $rateLimit = app(RateLimitManager::class)->make($limit);
 
-            return new static($rateLimit->getLimiter());
+            return new self($rateLimit->getLimiter());
         }
 
-        return new static(
+        return new self(
             limiter: new Limiter(
                 limit: $limit,
-                store: static::$defaultStore ?: static::defaultStore(),
-                deferrer: static::$defaultDeferrer ?: static::defaultDeferrer(),
+                store: self::$defaultStore ?: self::defaultStore(),
+                deferrer: self::$defaultDeferrer ?: self::defaultDeferrer(),
             )
         );
     }

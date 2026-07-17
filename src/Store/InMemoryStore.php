@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\HttpClientRateLimits\Store;
 
-class InMemoryStore implements Store
+final class InMemoryStore implements Store
 {
     /** @var array<string, list<int>> */
     protected array $timestamps = [];

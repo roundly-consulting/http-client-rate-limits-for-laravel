@@ -13,7 +13,7 @@ use RoundlyConsulting\HttpClientRateLimits\Jitter\Randomizer;
 use RoundlyConsulting\HttpClientRateLimits\Jitter\RandomRandomizer;
 use RoundlyConsulting\HttpClientRateLimits\Store\Store;
 
-class Limiter
+final class Limiter
 {
     /** @var list<Limit> */
     protected array $additionalLimits = [];

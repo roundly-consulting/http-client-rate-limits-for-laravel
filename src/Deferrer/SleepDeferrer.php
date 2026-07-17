@@ -6,7 +6,7 @@ namespace RoundlyConsulting\HttpClientRateLimits\Deferrer;
 
 use Illuminate\Support\Sleep;
 
-class SleepDeferrer implements Deferrer
+final class SleepDeferrer implements Deferrer
 {
     public function timestamp(): int
     {

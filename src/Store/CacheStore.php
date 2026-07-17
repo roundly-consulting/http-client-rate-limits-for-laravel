@@ -16,7 +16,7 @@ use Illuminate\Support\Facades\Cache;
  * write is wrapped in an atomic lock when the underlying store supports one.
  * Use the RedisStore when strict atomicity across many writers is required.
  */
-class CacheStore implements Store
+final class CacheStore implements Store
 {
     /** One day (the largest supported window) plus a generous margin, in seconds. */
     protected const RETENTION_SECONDS = 86_400 + 3_600;

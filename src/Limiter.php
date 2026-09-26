@@ -17,6 +17,12 @@ use RoundlyConsulting\HttpClientRateLimits\Store\Store;
 
 final class Limiter
 {
+    /**
+     * Reset values at or above this (2001-09-09 as epoch seconds, ~31.7 years as
+     * a delta) can only be absolute epoch timestamps.
+     */
+    protected const EPOCH_THRESHOLD_SECONDS = 1_000_000_000;
+
     /** @var list<Limit> */
     protected array $additionalLimits = [];
 
@@ -360,13 +366,18 @@ final class Limiter
             return null;
         }
 
-        // Reset may be epoch seconds (absolute) or a delta; treat large values as epoch.
+        // Reset may be epoch seconds (absolute) or a delta. A value ahead of our
+        // clock is an epoch still to come; an epoch-sized value at or behind it
+        // has already passed (clock skew, a slow response), so it asks for no
+        // wait — read as a delta it would stall the limiter for decades.
         $resetValue = (int) $reset;
         $nowSeconds = intdiv($now, 1000);
 
-        $seconds = $resetValue > $nowSeconds ? $resetValue - $nowSeconds : $resetValue;
+        if ($resetValue > $nowSeconds) {
+            return $resetValue - $nowSeconds;
+        }
 
-        return max($seconds, 0);
+        return $resetValue >= self::EPOCH_THRESHOLD_SECONDS ? 0 : $resetValue;
     }
 
     protected function dispatch(RequestDeferred|RequestAllowed $event): void

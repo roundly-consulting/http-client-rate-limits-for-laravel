@@ -385,3 +385,27 @@ it('treats a large reset value as an absolute epoch timestamp', function () {
 
     expect($store->penalizedUntil('api'))->toBe(1_000_000 + 100_000);
 });
+
+it('ignores an X-RateLimit-Reset epoch that has already passed', function () {
+    $store = new InMemoryStore;
+
+    // A real-world clock (ms); the server's reset epoch is two seconds behind it
+    // — e.g. clock skew, or a response that took a moment to arrive.
+    $now = 1_790_000_000_000;
+
+    $limiter = new Limiter(
+        limit: (new Limit(key: 'api', maxAttempts: 100, timespan: 'second'))->adaptive(),
+        store: $store,
+        deferrer: new TestDeferrer($now),
+    );
+
+    $response = new Response(new PsrResponse(200, [
+        'X-RateLimit-Remaining' => '0',
+        'X-RateLimit-Reset' => '1789999998',
+    ]));
+
+    $limiter->handle(fn () => $response);
+
+    // A passed reset asks for no wait — never a ~57-year "delta".
+    expect($store->penalizedUntil('api'))->toBeNull();
+});

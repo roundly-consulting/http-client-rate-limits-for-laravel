@@ -199,7 +199,7 @@ array accepts `rate`, `per`, and the optional `by`, `trim`, `max_wait`, `jitter`
 ### Compound limits (several windows at once)
 
 Pass an array of limits to enforce them all on one request; the limiter defers to the
-strictest and records a hit on every window when the call is allowed:
+strictest and records the call once in every window when it is allowed:
 
 ```php
 use RoundlyConsulting\HttpClientRateLimits\RateLimit;
@@ -209,7 +209,17 @@ Http::rateLimit([RateLimit::perSecond(5), RateLimit::perMinute(100)])
 
 // Or fluently, alongside the primary window:
 $middleware = RateLimit::perSecond(5)->alongside(RateLimit::perMinute(100));
+
+// Or by stacking the macro:
+Http::rateLimit(RateLimit::perSecond(5))->rateLimit(RateLimit::perMinute(100));
 ```
+
+Each window keeps its own count in the store — under `{key}:{window}`, e.g. `global:second`
+and `global:minute` (see `Limit::storeKey()`) — so a request counts exactly once per window
+however the limits are combined, and trimming the short window never erases the long one.
+Limits that share both key and window share one budget, wherever they are built. A `maxWait()`
+or `jitter()` set on any window of a compound limit applies to the whole wait (the tightest
+ceiling and the widest jitter win), whichever window turns out to be the bottleneck.
 
 ### Fail fast with a max-wait cap
 
@@ -243,6 +253,11 @@ waits exactly as long as the server asked:
 Http::rateLimit(RateLimit::perSecond(20)->adaptive())
     ->get('https://api.example.com/things');
 ```
+
+It works the same through `Http::rateLimit()`, `Http::withMiddleware()`, `Http::pool()`, an
+adaptive named profile (`'adaptive' => true`), and `$rateLimit->handle(fn () => Http::get(...))`.
+`X-RateLimit-Reset` may be a delta in seconds or an epoch timestamp; an epoch that has already
+passed asks for no wait.
 
 ### Pre-flight inspection
 
@@ -327,8 +342,11 @@ arguments to reset back to the config-driven defaults.
 
 ### Stores
 
-- **`InMemoryStore`** (default) — keeps request timestamps in process memory. Great for a
-  single worker/CLI run; not shared between processes.
+- **`InMemoryStore`** (default) — keeps request timestamps in process memory. One instance is
+  shared by every rate limit the app builds, so separate `Http::rateLimit()` calls accumulate
+  into the same budget within a process. It is **per-process only**: each queue worker, PHP-FPM
+  child or server keeps its own count, so with several workers use the `CacheStore`,
+  `RedisStore` or `DatabaseStore` instead.
 - **`CacheStore`** — shares limits across processes using whatever cache the app already runs
   (file, database, memcached, array, …) — no Redis required. The read-modify-write is wrapped
   in an atomic lock when the cache store supports one; otherwise it's best-effort. Configure
@@ -359,8 +377,8 @@ arguments to reset back to the config-driven defaults.
   $store = new DatabaseStore;
   ```
 
-Both the `CacheStore` and `RedisStore` self-trim entries older than the largest supported
-window so long-lived keys stay bounded. Every store also records server-imposed penalties for
+Every built-in store self-trims hits older than the largest supported window (one day, plus
+an hour's margin) so long-lived keys — and the `DatabaseStore` table — stay bounded. Every store also records server-imposed penalties for
 adaptive limiting via `penalizeUntil()` / `penalizedUntil()`. Write your own by implementing
 `RoundlyConsulting\HttpClientRateLimits\Store\Store`.
 
@@ -451,7 +469,8 @@ $fake->assertAllowed();            // at least one request went through
 
 `fake()` returns a `RateLimitsFake` exposing `assertDeferred(?string $key)`,
 `assertAllowed(?string $key)`, `assertNothingDeferred()`, and the shared `store()` /
-`deferrer()` for finer-grained assertions.
+`deferrer()` for finer-grained assertions. The store records hits per window, so read them
+back with the limit's store key: `$fake->store()->hits('acct-1:minute')`.
 
 ## Integrates with
 

@@ -206,7 +206,7 @@ final class Limiter
         }
 
         if ($maxDelay > 0) {
-            $maxDelay = $this->applyJitter($strictest, $maxDelay);
+            $maxDelay = $this->applyJitter($maxDelay);
         }
 
         return [$maxDelay, $strictest];
@@ -271,20 +271,43 @@ final class Limiter
         return $this->availableIn() > 0;
     }
 
+    /**
+     * A max-wait set on any enforced window caps the whole wait — the tightest
+     * wins — so a ceiling on the primary still applies when a window it runs
+     * alongside is the bottleneck.
+     */
     protected function guardMaxWait(Limit $limit, int $delay): void
     {
-        if ($limit->exceedsMaxWait($delay)) {
+        $ceiling = null;
+
+        foreach ($this->getLimits() as $candidate) {
+            $maxWait = $candidate->getMaxWait();
+
+            if ($maxWait !== null) {
+                $ceiling = $ceiling === null ? $maxWait : min($ceiling, $maxWait);
+            }
+        }
+
+        if ($ceiling !== null && $delay > $ceiling) {
             throw RateLimitExceededException::for(
                 key: $limit->getKey(),
                 delayMs: $delay,
-                maxWaitMs: (int) $limit->getMaxWait(),
+                maxWaitMs: $ceiling,
             );
         }
     }
 
-    protected function applyJitter(Limit $limit, int $delay): int
+    /**
+     * Spread the wait by the largest jitter configured on any enforced window,
+     * whichever window forced the wait.
+     */
+    protected function applyJitter(int $delay): int
     {
-        $jitter = $limit->getJitter();
+        $jitter = 0;
+
+        foreach ($this->getLimits() as $limit) {
+            $jitter = max($jitter, $limit->getJitter());
+        }
 
         if ($jitter <= 0) {
             return $delay;

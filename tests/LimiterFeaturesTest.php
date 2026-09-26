@@ -210,6 +210,63 @@ it('never produces a negative defer after jitter', function () {
     expect($delay)->toBe(0);
 });
 
+it('enforces the max wait when a compound window is the bottleneck', function () {
+    $store = new InMemoryStore;
+    $store->hit('acct:hour', 1_000_000);
+
+    // The 5s ceiling is set on the primary (per-second) window, but the per-hour
+    // window it runs alongside is what forces the wait.
+    $limiter = new Limiter(
+        limit: (new Limit(key: 'acct', maxAttempts: 5, timespan: 'second'))->maxWait(5_000),
+        store: $store,
+        deferrer: $deferrer = new TestDeferrer(1_000_000),
+    );
+    $limiter->addLimit(new Limit(key: 'acct', maxAttempts: 1, timespan: 'hour'));
+
+    try {
+        $limiter->handle(fn () => 'never');
+        $this->fail('Expected RateLimitExceededException.');
+    } catch (RateLimitExceededException $e) {
+        expect($e->key)->toBe('acct')
+            ->and($e->delayMs)->toBe(3_600_000)
+            ->and($e->maxWaitMs)->toBe(5_000)
+            ->and($deferrer->timestamp())->toBe(1_000_000); // never slept
+    }
+});
+
+it('uses the tightest max wait configured on any compound window', function () {
+    $store = new InMemoryStore;
+    $store->hit('global:minute', 1_000_000);
+
+    $limiter = new Limiter(
+        limit: (new Limit(maxAttempts: 5, timespan: 'second'))->maxWait(30_000),
+        store: $store,
+        deferrer: new TestDeferrer(1_000_000),
+    );
+    // The bottleneck's own 90s ceiling would allow the 60s wait; the 30s one must win.
+    $limiter->addLimit((new Limit(maxAttempts: 1, timespan: 'minute'))->maxWait(90_000));
+
+    $limiter->handle(fn () => 'never');
+})->throws(RateLimitExceededException::class);
+
+it('applies the configured jitter when a compound window is the bottleneck', function () {
+    $store = new InMemoryStore;
+    $store->hit('global:hour', 1_000_000);
+
+    $limiter = new Limiter(
+        limit: (new Limit(maxAttempts: 5, timespan: 'second'))->jitter(50),
+        store: $store,
+        deferrer: new TestDeferrer(1_000_000),
+        randomizer: new FixedRandomizer(30),
+    );
+    $limiter->addLimit(new Limit(maxAttempts: 1, timespan: 'hour'));
+
+    [$delay, $strictest] = $limiter->strictestDelay(1_000_000);
+
+    expect($delay)->toBe(3_600_000 + 30)
+        ->and($strictest->getTimespan())->toBe('hour');
+});
+
 it('reports remaining, availableIn and tooManyAttempts for the primary window', function () {
     $store = new InMemoryStore;
     $deferrer = new TestDeferrer(1_000_000);

@@ -7,13 +7,8 @@ namespace RoundlyConsulting\HttpClientRateLimits;
 use Closure;
 use Psr\Http\Message\RequestInterface;
 use RoundlyConsulting\HttpClientRateLimits\Deferrer\Deferrer;
-use RoundlyConsulting\HttpClientRateLimits\Deferrer\SleepDeferrer;
 use RoundlyConsulting\HttpClientRateLimits\Enums\Timespan;
-use RoundlyConsulting\HttpClientRateLimits\Exceptions\InvalidDeferrerException;
-use RoundlyConsulting\HttpClientRateLimits\Exceptions\InvalidStoreException;
 use RoundlyConsulting\HttpClientRateLimits\Exceptions\UndefinedMethodException;
-use RoundlyConsulting\HttpClientRateLimits\Store\InMemoryStore;
-use RoundlyConsulting\HttpClientRateLimits\Store\RedisStore;
 use RoundlyConsulting\HttpClientRateLimits\Store\Store;
 
 /**
@@ -35,53 +30,28 @@ final class RateLimit
 
     public static function make(Limit $limit): static
     {
-        // Prefer the container-bound manager (config-driven, overridable), but
-        // keep a static fallback so `RateLimit::*` still works without a container.
-        if (self::$defaultStore === null
-            && self::$defaultDeferrer === null
-            && function_exists('app')
-            && app()->bound(RateLimitManager::class)) {
-            /** @var RateLimit $rateLimit */
-            $rateLimit = app(RateLimitManager::class)->make($limit);
-
-            return new self($rateLimit->getLimiter());
-        }
-
-        return new self(
-            limiter: new Limiter(
+        if (self::$defaultStore !== null && self::$defaultDeferrer !== null) {
+            return new self(new Limiter(
                 limit: $limit,
-                store: self::$defaultStore ?: self::defaultStore(),
-                deferrer: self::$defaultDeferrer ?: self::defaultDeferrer(),
-            )
-        );
-    }
-
-    protected static function defaultStore(): Store
-    {
-        $store = config('http-client-rate-limits.store', InMemoryStore::class);
-
-        if (! is_string($store) || ! is_a($store, Store::class, true)) {
-            throw InvalidStoreException::for($store);
+                store: self::$defaultStore,
+                deferrer: self::$defaultDeferrer,
+            ));
         }
 
-        if ($store === RedisStore::class) {
-            $connection = config('http-client-rate-limits.redis_connection', 'default');
+        // The container-bound manager owns the config-driven defaults (including
+        // the store every limit in the process shares) and honours a swapped fake.
+        /** @var RateLimitManager $manager */
+        $manager = app(RateLimitManager::class);
 
-            return new RedisStore(is_string($connection) ? $connection : 'default');
+        if (self::$defaultStore === null && self::$defaultDeferrer === null) {
+            return new self($manager->make($limit)->getLimiter());
         }
 
-        return new $store;
-    }
-
-    protected static function defaultDeferrer(): Deferrer
-    {
-        $deferrer = config('http-client-rate-limits.deferrer', SleepDeferrer::class);
-
-        if (! is_string($deferrer) || ! is_a($deferrer, Deferrer::class, true)) {
-            throw InvalidDeferrerException::for($deferrer);
-        }
-
-        return new $deferrer;
+        return new self(new Limiter(
+            limit: $limit,
+            store: self::$defaultStore ?? $manager->store(),
+            deferrer: self::$defaultDeferrer ?? $manager->deferrer(),
+        ));
     }
 
     public static function perSecond(int $maxAttempts = 1): static

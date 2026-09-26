@@ -24,6 +24,8 @@ use RoundlyConsulting\HttpClientRateLimits\Testing\RateLimitsFake;
  * @method static RateLimit perDay(int $maxAttempts = 1)
  * @method static RateLimitManager usingStore(Store $store)
  * @method static RateLimitManager usingDeferrer(Deferrer $deferrer)
+ * @method static Store store()
+ * @method static Deferrer deferrer()
  *
  * @see RateLimitManager
  */

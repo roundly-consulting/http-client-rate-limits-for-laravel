@@ -66,3 +66,24 @@ it('records and reads penalties keeping the latest', function () {
     expect($store->penalizedUntil('john'))->toBe(8_000)
         ->and($store->penalizedUntil('jane'))->toBeNull();
 });
+
+it('drops hits older than the retention window on write', function () {
+    $store = new InMemoryStore;
+
+    $store->hit('john', 1_000);
+    // A hit beyond the one-day (+1h) retention evicts the ancient entry, so a
+    // long-lived shared store stays bounded.
+    $newest = 1_000 + (90_001 * 1000);
+    $store->hit('john', $newest);
+
+    expect($store->hits('john'))->toBe([$newest]);
+});
+
+it('keeps hits inside the retention window', function () {
+    $store = new InMemoryStore;
+
+    $store->hit('john', 1_000);
+    $store->hit('john', 1_000 + 86_400_000);
+
+    expect($store->hits('john'))->toBe([1_000, 1_000 + 86_400_000]);
+});

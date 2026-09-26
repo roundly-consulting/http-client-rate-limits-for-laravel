@@ -83,6 +83,18 @@ final class Limit
         return $this->key;
     }
 
+    /**
+     * The key this window's hits are recorded under in the store: the owner key
+     * plus the window. Limits on one owner with different windows (5/sec AND
+     * 100/min — compound or stacked middleware) then each count a request exactly
+     * once, and trimming the shorter window can never erase the longer one's
+     * history. Limits sharing both key and window share one budget.
+     */
+    public function storeKey(): string
+    {
+        return "{$this->key}:{$this->timespan->value}";
+    }
+
     public function trim(bool $trim = true): self
     {
         $this->trim = $trim;

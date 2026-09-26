@@ -93,6 +93,12 @@ it('throws a typed exception for an unknown timespan string', function () {
     new Limit(timespan: 'decade');
 })->throws(InvalidTimespanException::class);
 
+it('keys its store series by owner and window', function () {
+    expect((new Limit('acct', 5, 'minute'))->storeKey())->toBe('acct:minute')
+        ->and((new Limit('acct', 5, 'second'))->storeKey())->toBe('acct:second')
+        ->and((new Limit)->by('gh')->perHour(10)->storeKey())->toBe('gh:hour');
+});
+
 it('toggles the trim flag', function () {
     $limit = new Limit;
 

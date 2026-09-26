@@ -59,7 +59,7 @@ it('reports exhaustion through preflight helpers after hits', function () {
 
     $rateLimit = RateLimit::perSecond(1)->by('acct-1');
 
-    $store->hit('acct-1', 1_000_000);
+    $store->hit('acct-1:second', 1_000_000);
 
     expect($rateLimit->remaining())->toBe(0)
         ->and($rateLimit->tooManyAttempts())->toBeTrue()

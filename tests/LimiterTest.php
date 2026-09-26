@@ -112,14 +112,14 @@ it('returns delay until next request in ms', function () {
     expect($limiter->delayUntilNextRequestInMs(1681221901000))
         ->toBe(0);
 
-    $limiter->getStore()->hit($limiter->getLimit()->getKey(), 1681221901000);
+    $limiter->getStore()->hit($limiter->getLimit()->storeKey(), 1681221901000);
 
     // Full delay - 1 minute
     expect($limiter->delayUntilNextRequestInMs(1681221901000))
         ->toBe(60000);
 
-    $limiter->getStore()->clear($limiter->getLimit()->getKey(), 1681221901000);
-    $limiter->getStore()->hit($limiter->getLimit()->getKey(), 1681221871000);
+    $limiter->getStore()->clear($limiter->getLimit()->storeKey(), 1681221901000);
+    $limiter->getStore()->hit($limiter->getLimit()->storeKey(), 1681221871000);
 
     // Specific delay - half minute
     expect($limiter->delayUntilNextRequestInMs(1681221901000))
@@ -134,11 +134,11 @@ it('keeps the store bounded to the active window when trimming is enabled', func
     $limiter = new Limiter(limit: $limit, store: $store, deferrer: new TestDeferrer(1_000_000));
 
     // Pre-seed an old hit far outside the 1-second window.
-    $store->hit('global', 0);
+    $store->hit('global:second', 0);
 
     $limiter->handle(fn () => null);
 
-    expect($store->hits('global'))->toBe([1_000_000])
+    expect($store->hits('global:second'))->toBe([1_000_000])
         ->and($limit->shouldTrim())->toBeTrue();
 });
 
@@ -151,11 +151,11 @@ it('does not trim when trimming is disabled by default', function () {
         deferrer: new TestDeferrer(1_000_000),
     );
 
-    $store->hit('global', 0);
+    $store->hit('global:second', 0);
 
     $limiter->handle(fn () => null);
 
-    expect($store->hits('global'))->toBe([0, 1_000_000]);
+    expect($store->hits('global:second'))->toBe([0, 1_000_000]);
 });
 
 it('records hit to store and executes callback', function () {
@@ -175,7 +175,7 @@ it('records hit to store and executes callback', function () {
 
     expect($executed)
         ->toBeTrue()
-        ->and($limiter->getStore()->hits($limiter->getLimit()->getKey()))
+        ->and($limiter->getStore()->hits($limiter->getLimit()->storeKey()))
         ->toBe([
             1681221901000,
         ]);
@@ -192,7 +192,7 @@ it('uses deferrer and then records hit to store and executes callback', function
         deferrer: new TestDeferrer($frozenTimeInMs),
     );
 
-    $limiter->getStore()->hit($limiter->getLimit()->getKey(), $frozenTimeInMs);
+    $limiter->getStore()->hit($limiter->getLimit()->storeKey(), $frozenTimeInMs);
 
     $executed = false;
 
@@ -206,7 +206,7 @@ it('uses deferrer and then records hit to store and executes callback', function
         ->toBeTrue()
         ->and($limiter->getDeferrer()->timestamp() - $frozenTimeInMs)
         ->toBe($expectedSleepInMs)
-        ->and($limiter->getStore()->hits($limiter->getLimit()->getKey()))
+        ->and($limiter->getStore()->hits($limiter->getLimit()->storeKey()))
         ->toBe([
             $frozenTimeInMs,
             $frozenTimeInMs + $expectedSleepInMs,

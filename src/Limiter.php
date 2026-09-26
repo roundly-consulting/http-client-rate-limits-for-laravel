@@ -120,12 +120,21 @@ final class Limiter
 
         $timestamp = $this->deferrer->timestamp();
 
+        /** @var array<string, true> $recorded */
+        $recorded = [];
+
         foreach ($this->getLimits() as $limit) {
-            $this->store->hit($limit->getKey(), $timestamp);
+            $storeKey = $limit->storeKey();
+
+            // One hit per window series, however many limits read it.
+            if (! isset($recorded[$storeKey])) {
+                $this->store->hit($storeKey, $timestamp);
+                $recorded[$storeKey] = true;
+            }
 
             if ($limit->shouldTrim()) {
                 $this->store->clear(
-                    owner: $limit->getKey(),
+                    owner: $storeKey,
                     timestamp: $timestamp - $limit->timespanLengthInMs(),
                 );
             }
@@ -134,7 +143,7 @@ final class Limiter
         $this->dispatch(new RequestAllowed(
             key: $this->limit->getKey(),
             hitsInWindow: count($this->store->hitsSince(
-                owner: $this->limit->getKey(),
+                owner: $this->limit->storeKey(),
                 timestamp: $timestamp - $this->limit->timespanLengthInMs(),
             )),
             timespan: $this->limit->getTimespanEnum(),
@@ -202,7 +211,7 @@ final class Limiter
         $timespanLength = $limit->timespanLengthInMs();
 
         $requestsInTimespan = $this->store->hitsSince(
-            owner: $limit->getKey(),
+            owner: $limit->storeKey(),
             timestamp: $currentAttemptTimestamp - $timespanLength,
         );
 
@@ -233,7 +242,7 @@ final class Limiter
     public function remainingForLimit(Limit $limit): int
     {
         $used = count($this->store->hitsSince(
-            owner: $limit->getKey(),
+            owner: $limit->storeKey(),
             timestamp: $this->deferrer->timestamp() - $limit->timespanLengthInMs(),
         ));
 

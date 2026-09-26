@@ -40,7 +40,8 @@ it('defers by the strictest of several compound windows', function () {
     );
     $limiter->addLimit(new Limit(maxAttempts: 1, timespan: 'minute'));
 
-    $store->hit('global', 1_000_000);
+    $store->hit('global:second', 1_000_000);
+    $store->hit('global:minute', 1_000_000);
 
     [$delay, $strictest] = $limiter->strictestDelay(1_000_000);
 
@@ -61,8 +62,72 @@ it('records a hit on every compound window when allowed', function () {
 
     $limiter->handle(fn () => null);
 
-    expect($store->hits('sec'))->toBe([1_000_000])
-        ->and($store->hits('min'))->toBe([1_000_000]);
+    expect($store->hits('sec:second'))->toBe([1_000_000])
+        ->and($store->hits('min:minute'))->toBe([1_000_000]);
+});
+
+it('counts each request once when compound windows share an owner key', function () {
+    $store = new InMemoryStore;
+    $deferrer = new TestDeferrer(1_000_000);
+
+    // 5/sec AND 100/min on the same (default) owner key.
+    $limiter = new Limiter(
+        limit: new Limit(maxAttempts: 5, timespan: 'second'),
+        store: $store,
+        deferrer: $deferrer,
+    );
+    $limiter->addLimit(new Limit(maxAttempts: 100, timespan: 'minute'));
+
+    foreach (range(1, 5) as $ignored) {
+        $limiter->handle(fn () => null);
+    }
+
+    // All five fit the 5/sec budget — nothing waited.
+    expect($deferrer->timestamp())->toBe(1_000_000);
+
+    $limiter->handle(fn () => null);
+
+    // The sixth waits out the one-second window.
+    expect($deferrer->timestamp())->toBe(1_001_000);
+});
+
+it('counts each request once when two compound limits share a window and key', function () {
+    $store = new InMemoryStore;
+
+    $limiter = new Limiter(
+        limit: new Limit(key: 'api', maxAttempts: 5, timespan: 'second'),
+        store: $store,
+        deferrer: new TestDeferrer(1_000_000),
+    );
+    $limiter->addLimit(new Limit(key: 'api', maxAttempts: 10, timespan: 'second'));
+
+    $limiter->handle(fn () => null);
+
+    expect($store->hits('api:second'))->toBe([1_000_000]);
+});
+
+it('keeps a longer window intact when a shorter window on the same key trims', function () {
+    $store = new InMemoryStore;
+    $deferrer = new TestDeferrer(1_000_000);
+
+    // 5/sec (trimmed) AND 3/min on the same owner key.
+    $limiter = new Limiter(
+        limit: (new Limit(maxAttempts: 5, timespan: 'second'))->trim(),
+        store: $store,
+        deferrer: $deferrer,
+    );
+    $limiter->addLimit(new Limit(maxAttempts: 3, timespan: 'minute'));
+
+    foreach (range(1, 3) as $ignored) {
+        $limiter->handle(fn () => null);
+        $deferrer->defer(2_000); // space the calls out past the 1-second window
+    }
+
+    $limiter->handle(fn () => null);
+
+    // The 3/min window still remembers the first hit, so the fourth call waits
+    // until that hit leaves the minute (first hit + 60s).
+    expect($deferrer->timestamp())->toBe(1_060_000);
 });
 
 it('throws when the computed defer exceeds the max wait', function () {
@@ -75,14 +140,14 @@ it('throws when the computed defer exceeds the max wait', function () {
         deferrer: $deferrer,
     );
 
-    $store->hit('global', 1_000_000);
+    $store->hit('global:hour', 1_000_000);
 
     $limiter->handle(fn () => 'never');
 })->throws(RateLimitExceededException::class);
 
 it('exposes the offending key and delays on the max wait exception', function () {
     $store = new InMemoryStore;
-    $store->hit('acct', 1_000_000);
+    $store->hit('acct:hour', 1_000_000);
 
     $limiter = new Limiter(
         limit: (new Limit(key: 'acct', maxAttempts: 1, timespan: 'hour'))->maxWait(5_000),
@@ -114,7 +179,7 @@ it('does not throw when the defer is within the max wait', function () {
 
 it('adds deterministic jitter to the defer', function () {
     $store = new InMemoryStore;
-    $store->hit('global', 1_000_000);
+    $store->hit('global:second', 1_000_000);
 
     $limiter = new Limiter(
         limit: (new Limit(maxAttempts: 1, timespan: 'second'))->jitter(50),
@@ -131,7 +196,7 @@ it('adds deterministic jitter to the defer', function () {
 
 it('never produces a negative defer after jitter', function () {
     $store = new InMemoryStore;
-    $store->hit('global', 1_000_000);
+    $store->hit('global:second', 1_000_000);
 
     $limiter = new Limiter(
         limit: (new Limit(maxAttempts: 1, timespan: 'second'))->jitter(5_000),
@@ -159,9 +224,9 @@ it('reports remaining, availableIn and tooManyAttempts for the primary window', 
         ->and($limiter->availableIn())->toBe(0)
         ->and($limiter->tooManyAttempts())->toBeFalse();
 
-    $store->hit('acct', 1_000_000);
-    $store->hit('acct', 1_000_000);
-    $store->hit('acct', 1_000_000);
+    $store->hit('acct:second', 1_000_000);
+    $store->hit('acct:second', 1_000_000);
+    $store->hit('acct:second', 1_000_000);
 
     expect($limiter->remaining())->toBe(0)
         ->and($limiter->availableIn())->toBe(1_000)

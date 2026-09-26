@@ -55,8 +55,8 @@ it('scopes the limit to an owner via the by argument', function () {
 
     Http::rateLimit(5, by: 'acct-1')->get('https://api.example.com/one');
 
-    expect($store->hits('acct-1'))->toHaveCount(1)
-        ->and($store->hits('global'))->toBeEmpty();
+    expect($store->hits('acct-1:minute'))->toHaveCount(1)
+        ->and($store->hits('global:minute'))->toBeEmpty();
 });
 
 it('returns a response through the macro', function () {
@@ -74,7 +74,7 @@ it('resolves a named profile from a string', function () {
 
     Http::rateLimit('github')->get('https://api.example.com/one');
 
-    expect($store->hits('gh'))->toHaveCount(1);
+    expect($store->hits('gh:minute'))->toHaveCount(1);
 });
 
 it('enforces compound windows from an array', function () {
@@ -89,4 +89,24 @@ it('enforces compound windows from an array', function () {
     $fake->assertDeferred();
 
     expect($fake->deferrer()->deferCount())->toBe(1);
+});
+
+it('counts each request once when stacked macro limits share an owner key', function () {
+    $deferrer = new TestDeferrer(1_000_000);
+    RateLimit::use(new InMemoryStore, $deferrer);
+
+    foreach (range(1, 5) as $ignored) {
+        Http::rateLimit(RateLimit::perSecond(5))
+            ->rateLimit(RateLimit::perMinute(100))
+            ->get('https://api.example.com/things');
+    }
+
+    // Five requests against 5/sec AND 100/min: neither budget is exhausted.
+    expect($deferrer->timestamp())->toBe(1_000_000);
+
+    Http::rateLimit(RateLimit::perSecond(5))
+        ->rateLimit(RateLimit::perMinute(100))
+        ->get('https://api.example.com/things');
+
+    expect($deferrer->timestamp())->toBe(1_001_000);
 });

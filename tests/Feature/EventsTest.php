@@ -34,7 +34,7 @@ it('dispatches RequestDeferred with the delay payload when throttled', function 
     Event::fake();
 
     $store = new InMemoryStore;
-    $store->hit('global', 0);
+    $store->hit('global:minute', 0);
 
     $limiter = new Limiter(
         limit: new Limit(maxAttempts: 1, timespan: Timespan::Minute),

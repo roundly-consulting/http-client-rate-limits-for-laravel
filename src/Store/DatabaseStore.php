@@ -14,12 +14,22 @@ use RoundlyConsulting\HttpClientRateLimits\Models\RateLimitHit;
  */
 final class DatabaseStore implements Store
 {
+    /** One day (the largest supported window) plus a generous margin, in milliseconds. */
+    protected const RETENTION_MS = (86_400 + 3_600) * 1_000;
+
     public function hit(string $owner, int $timestamp): void
     {
         $this->query()->create([
             'owner' => $owner,
             'hit_at' => $timestamp,
         ]);
+
+        // Sweep hits (of any owner) older than the largest window so the table
+        // stays bounded, as the cache/redis stores do; penalty rows are untouched.
+        $this->query()
+            ->whereNotNull('hit_at')
+            ->where('hit_at', '<', $timestamp - self::RETENTION_MS)
+            ->forceDelete();
     }
 
     /**

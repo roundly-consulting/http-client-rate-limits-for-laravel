@@ -78,3 +78,30 @@ it('persists hits through the eloquent model', function () {
 
     expect(RateLimitHit::query()->where('owner', 'john')->whereNotNull('hit_at')->count())->toBe(1);
 });
+
+it('prunes hits older than the retention window on write', function () {
+    $store = new DatabaseStore;
+
+    $store->hit('john', 1_000);
+    $store->hit('jane', 1_000);
+    $store->penalizeUntil('jane', 5_000);
+
+    // A hit beyond the one-day (+1h) retention sweeps every expired hit row —
+    // for any owner — so the table stays bounded; penalty rows are kept.
+    $newest = 1_000 + (90_001 * 1000);
+    $store->hit('john', $newest);
+
+    expect($store->hits('john'))->toBe([$newest])
+        ->and($store->hits('jane'))->toBe([])
+        ->and($store->penalizedUntil('jane'))->toBe(5_000)
+        ->and(RateLimitHit::withTrashed()->whereNotNull('hit_at')->count())->toBe(1);
+});
+
+it('keeps hits inside the retention window on write', function () {
+    $store = new DatabaseStore;
+
+    $store->hit('john', 1_000);
+    $store->hit('john', 1_000 + 86_400_000);
+
+    expect($store->hits('john'))->toBe([1_000, 1_000 + 86_400_000]);
+});

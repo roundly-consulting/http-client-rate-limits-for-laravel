@@ -56,28 +56,28 @@ final class RateLimit
 
     public static function perSecond(int $maxAttempts = 1): static
     {
-        return static::make(
+        return self::make(
             limit: new Limit(maxAttempts: $maxAttempts, timespan: Timespan::Second),
         );
     }
 
     public static function perMinute(int $maxAttempts = 1): static
     {
-        return static::make(
+        return self::make(
             limit: new Limit(maxAttempts: $maxAttempts, timespan: Timespan::Minute),
         );
     }
 
     public static function perHour(int $maxAttempts = 1): static
     {
-        return static::make(
+        return self::make(
             limit: new Limit(maxAttempts: $maxAttempts, timespan: Timespan::Hour),
         );
     }
 
     public static function perDay(int $maxAttempts = 1): static
     {
-        return static::make(
+        return self::make(
             limit: new Limit(maxAttempts: $maxAttempts, timespan: Timespan::Day),
         );
     }

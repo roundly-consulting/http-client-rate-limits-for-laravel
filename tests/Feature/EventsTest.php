@@ -51,6 +51,67 @@ it('dispatches RequestDeferred with the delay payload when throttled', function 
     });
 });
 
+it('reports the real hit count of the window that caused the deferral', function () {
+    Event::fake();
+
+    // Another process already pushed the shared minute window past its budget of 2.
+    $store = new InMemoryStore;
+    $store->hit('global:minute', 1_000);
+    $store->hit('global:minute', 2_000);
+    $store->hit('global:minute', 3_000);
+
+    $limiter = new Limiter(
+        limit: new Limit(maxAttempts: 2, timespan: Timespan::Minute),
+        store: $store,
+        deferrer: new TestDeferrer(10_000),
+    );
+
+    $limiter->handle(fn () => null);
+
+    Event::assertDispatched(RequestDeferred::class, fn (RequestDeferred $event): bool => $event->hitsInWindow === 3);
+});
+
+it('reports the hit count of the compound window that forced the wait', function () {
+    Event::fake();
+
+    // 5/sec is free (nothing in the last second); 2/min holds 3 hits and forces the wait.
+    $store = new InMemoryStore;
+    $store->hit('api:minute', 1_000);
+    $store->hit('api:minute', 2_000);
+    $store->hit('api:minute', 3_000);
+
+    $limiter = new Limiter(
+        limit: new Limit(key: 'api', maxAttempts: 5, timespan: Timespan::Second),
+        store: $store,
+        deferrer: new TestDeferrer(10_000),
+    );
+    $limiter->addLimit(new Limit(key: 'api', maxAttempts: 2, timespan: Timespan::Minute));
+
+    $limiter->handle(fn () => null);
+
+    Event::assertDispatched(RequestDeferred::class, fn (RequestDeferred $event): bool => $event->hitsInWindow === 3
+        && $event->timespan === Timespan::Minute
+        && $event->delayMs === 51_000);
+});
+
+it('reports zero hits when a server penalty alone forces the wait', function () {
+    Event::fake();
+
+    $store = new InMemoryStore;
+    $store->penalizeUntil('api', 15_000);
+
+    $limiter = new Limiter(
+        limit: new Limit(key: 'api', maxAttempts: 100, timespan: Timespan::Second),
+        store: $store,
+        deferrer: new TestDeferrer(10_000),
+    );
+
+    $limiter->handle(fn () => null);
+
+    Event::assertDispatched(RequestDeferred::class, fn (RequestDeferred $event): bool => $event->hitsInWindow === 0
+        && $event->delayMs === 5_000);
+});
+
 it('runs without error when no event dispatcher is bound', function () {
     app()->forgetInstance('events');
     app()->offsetUnset('events');

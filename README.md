@@ -409,7 +409,10 @@ Write your own by implementing
 When `events_enabled` is on (the default), the limiter dispatches:
 
 - **`RequestDeferred`** — `string $key`, `int $delayMs`, `int $hitsInWindow`, `Timespan $timespan` —
-  right before a request is paused because the budget is exhausted.
+  right before a request is paused because the budget is exhausted. The key, count and window
+  describe the window that forced the wait (for a compound limit, the strictest one);
+  `hitsInWindow` is the real number of requests recorded in it, `0` when an adaptive server
+  penalty alone caused the wait.
 - **`RequestAllowed`** — `string $key`, `int $hitsInWindow`, `Timespan $timespan` — after a
   request is recorded and allowed through.
 

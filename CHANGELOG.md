@@ -28,4 +28,5 @@ All notable changes to `http-client-rate-limits-for-laravel` will be documented 
 - A `maxWait()` or `jitter()` on any window of a compound limit now applies whichever window is
   the bottleneck (tightest ceiling, widest jitter); the ceiling set on the primary window used
   to be skipped when an `alongside()` window forced the wait.
-
+- `RequestDeferred::$hitsInWindow` reports the real number of requests in the window that forced
+  the wait (`0` when an adaptive penalty alone did) instead of that window's `maxAttempts`.

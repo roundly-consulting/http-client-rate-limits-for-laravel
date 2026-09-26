@@ -117,7 +117,12 @@ final class Limiter
             $this->dispatch(new RequestDeferred(
                 key: $strictest->getKey(),
                 delayMs: $delay,
-                hitsInWindow: $strictest->getMaxAttempts(),
+                // The real count in the window that forced the wait (0 when a
+                // server penalty alone did), not the window's budget.
+                hitsInWindow: count($this->store->hitsSince(
+                    owner: $strictest->storeKey(),
+                    timestamp: $now - $strictest->timespanLengthInMs(),
+                )),
                 timespan: $strictest->getTimespanEnum(),
             ));
 

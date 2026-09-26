@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\HttpClientRateLimits;
 
+use GuzzleHttp\Promise\PromiseInterface;
 use Illuminate\Http\Client\Response;
+use Psr\Http\Message\ResponseInterface;
 use RoundlyConsulting\HttpClientRateLimits\Deferrer\Deferrer;
 use RoundlyConsulting\HttpClientRateLimits\Events\RequestAllowed;
 use RoundlyConsulting\HttpClientRateLimits\Events\RequestDeferred;
@@ -140,9 +142,21 @@ final class Limiter
 
         $result = $callback();
 
-        if ($result instanceof Response && $this->shouldAdapt()) {
-            $this->adaptFrom($result, $this->deferrer->timestamp());
+        if (! $this->shouldAdapt()) {
+            return $result;
         }
+
+        // As Guzzle middleware the handler hands back a promise of a PSR-7
+        // response, so adapt once it settles rather than only on a bare Response.
+        if ($result instanceof PromiseInterface) {
+            return $result->then(function (mixed $response): mixed {
+                $this->adaptFromResult($response);
+
+                return $response;
+            });
+        }
+
+        $this->adaptFromResult($result);
 
         return $result;
     }
@@ -275,6 +289,21 @@ final class Limiter
         }
 
         return false;
+    }
+
+    /**
+     * Adapt from whatever the request produced: an Illuminate response (callback
+     * path) or a PSR-7 response (middleware path). Anything else is ignored.
+     */
+    protected function adaptFromResult(mixed $result): void
+    {
+        if ($result instanceof ResponseInterface) {
+            $result = new Response($result);
+        }
+
+        if ($result instanceof Response) {
+            $this->adaptFrom($result, $this->deferrer->timestamp());
+        }
     }
 
     /**

@@ -138,22 +138,23 @@ class RateLimitManager
     }
 
     /**
-     * Build a RateLimit that enforces several windows at once (the strictest wins).
+     * Build a RateLimit that enforces several windows at once (the strictest wins). Takes
+     * copies of every window given (all of a RateLimit's), so re-keying the result with
+     * `by()` never reaches the limits passed in.
      *
      * @param  list<Limit|RateLimit>  $limits
      */
     public function compound(array $limits): RateLimit
     {
-        $resolved = array_map(
-            static fn (Limit|RateLimit $limit): Limit => $limit instanceof RateLimit
-                ? $limit->getLimiter()->getLimit()
-                : $limit,
-            $limits,
-        );
+        $resolved = [];
 
-        $primary = $resolved[0] ?? new Limit;
+        foreach ($limits as $limit) {
+            foreach ($limit instanceof RateLimit ? $limit->getLimiter()->getLimits() : [$limit] as $window) {
+                $resolved[] = clone $window;
+            }
+        }
 
-        $rateLimit = $this->make($primary);
+        $rateLimit = $this->make($resolved[0] ?? new Limit);
 
         foreach (array_slice($resolved, 1) as $additional) {
             $rateLimit->getLimiter()->addLimit($additional);

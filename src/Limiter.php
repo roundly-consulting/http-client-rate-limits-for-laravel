@@ -39,6 +39,19 @@ final class Limiter
         $this->randomizer = $randomizer ?? new RandomRandomizer;
     }
 
+    /**
+     * A copy owns copies of its limits (the store, deferrer and randomizer stay shared), so
+     * re-keying or re-tuning the copy never reaches the original.
+     */
+    public function __clone()
+    {
+        $this->limit = clone $this->limit;
+        $this->additionalLimits = array_map(
+            static fn (Limit $limit): Limit => clone $limit,
+            $this->additionalLimits,
+        );
+    }
+
     public function getLimit(): Limit
     {
         return $this->limit;

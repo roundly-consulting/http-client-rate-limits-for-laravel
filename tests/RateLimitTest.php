@@ -237,6 +237,51 @@ it('overrides only the store, or only the deferrer, per manager', function () {
         ->and(RateLimits::perMinute(5)->getStore())->toBeInstanceOf(InMemoryStore::class);
 });
 
+it('re-keys every window of a compound limit with by()', function () {
+    $compound = RateLimits::compound([RateLimits::perSecond(5), RateLimits::perMinute(100)])->by('acct-3');
+    $alongside = RateLimits::perSecond(5)->alongside([RateLimits::perMinute(100), new Limit(maxAttempts: 9, timespan: 'hour')])->by('acct-4');
+
+    $storeKeys = static fn (RateLimit $limit): array => array_map(
+        static fn (Limit $window): string => $window->storeKey(),
+        $limit->getLimiter()->getLimits(),
+    );
+
+    expect($storeKeys($compound))->toBe(['acct-3:second', 'acct-3:minute'])
+        ->and($storeKeys($alongside))->toBe(['acct-4:second', 'acct-4:minute', 'acct-4:hour']);
+});
+
+it('copies the windows it absorbs, so by() never reaches the limits passed in', function () {
+    $perMinute = RateLimits::perMinute(100);
+    $perHour = new Limit(maxAttempts: 9, timespan: 'hour');
+
+    RateLimits::compound([RateLimits::perSecond(5), $perMinute, $perHour])->by('acct-5');
+    RateLimits::perSecond(5)->alongside([$perMinute, $perHour])->by('acct-6');
+
+    expect($perMinute->getKey())->toBe('global')
+        ->and($perHour->getKey())->toBe('global');
+});
+
+it('takes every window of a compound RateLimit it runs alongside', function () {
+    $limit = RateLimits::perSecond(5)->alongside(
+        RateLimits::compound([RateLimits::perMinute(100), RateLimits::perHour(1_000)]),
+    );
+
+    expect(array_map(static fn (Limit $window): string => $window->getTimespan(), $limit->getLimiter()->getLimits()))
+        ->toBe(['second', 'minute', 'hour']);
+});
+
+it('copies a rate limit deeply but keeps its store and deferrer', function () {
+    $original = RateLimits::perSecond(5)->alongside(RateLimits::perMinute(100));
+    $copy = (clone $original)->by('copy')->maxWait(10);
+
+    expect($copy->getLimiter())->not->toBe($original->getLimiter())
+        ->and($copy->getStore())->toBe($original->getStore())
+        ->and($copy->getDeferrer())->toBe($original->getDeferrer())
+        ->and($original->getKey())->toBe('global')
+        ->and($original->getLimiter()->getLimit()->getMaxWait())->toBeNull()
+        ->and($copy->getLimiter()->getLimits()[1]->getKey())->toBe('copy');
+});
+
 it('resolves a database store on the configured connection from config', function (?string $configured, ?string $expected) {
     config()->set('http-client-rate-limits.store', DatabaseStore::class);
     config()->set('http-client-rate-limits.database_connection', $configured);

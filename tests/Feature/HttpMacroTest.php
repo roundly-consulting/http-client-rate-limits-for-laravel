@@ -105,3 +105,37 @@ it('counts each request once when stacked macro limits share an owner key', func
 
     expect($deferrer->timestamp())->toBe(1_001_000);
 });
+
+// Bug: `by:` re-keyed only the primary window; the per-minute budget stayed shared on `global`.
+it('scopes every window of a compound limit to the by owner', function () {
+    $store = new InMemoryStore;
+    rateLimitsUsing($store, new TestDeferrer(1_000_000));
+
+    Http::rateLimit([RateLimits::perSecond(5), RateLimits::perMinute(100)], by: 'acct-1')->get('https://api.example.com/one');
+    Http::rateLimit([RateLimits::perSecond(5), RateLimits::perMinute(100)], by: 'acct-2')->get('https://api.example.com/two');
+
+    expect($store->hits('acct-1:second'))->toHaveCount(1)
+        ->and($store->hits('acct-1:minute'))->toHaveCount(1)
+        ->and($store->hits('acct-2:second'))->toHaveCount(1)
+        ->and($store->hits('acct-2:minute'))->toHaveCount(1)
+        ->and($store->hits('global:minute'))->toBe([]);
+});
+
+it('re-keys a copy, never the RateLimit or Limit the caller passed', function () {
+    $store = new InMemoryStore;
+    rateLimitsUsing($store, new TestDeferrer(1_000_000));
+
+    $shared = RateLimits::perSecond(5)->alongside(RateLimits::perMinute(100));
+    $limit = new Limit(maxAttempts: 5, timespan: 'hour');
+
+    Http::rateLimit($shared, by: 'acct-1')->get('https://api.example.com/one');
+    Http::rateLimit($limit, by: 'acct-1')->get('https://api.example.com/two');
+
+    expect(array_map(static fn (Limit $window): string => $window->getKey(), $shared->getLimiter()->getLimits()))
+        ->toBe(['global', 'global'])
+        ->and($limit->getKey())->toBe('global')
+        ->and($store->hits('acct-1:second'))->toHaveCount(1)
+        ->and($store->hits('acct-1:minute'))->toHaveCount(1)
+        ->and($store->hits('acct-1:hour'))->toHaveCount(1)
+        ->and($store->hits('global:second'))->toBe([]);
+});

@@ -68,8 +68,10 @@ final class HttpClientRateLimitsServiceProvider extends PackageServiceProvider
                 default => $manager->perMinute($limit), // int shorthand = per-minute
             };
 
+            // Re-key a copy: every window of it, and never the RateLimit/Limit the caller
+            // handed in, which may be reused elsewhere under its own key.
             if ($by !== null) {
-                $middleware->by($by);
+                $middleware = (clone $middleware)->by($by);
             }
 
             /** @var PendingRequest $this */

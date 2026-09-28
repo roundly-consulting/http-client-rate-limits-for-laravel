@@ -19,23 +19,33 @@ final class RateLimit
 {
     public function __construct(protected Limiter $limiter) {}
 
+    /**
+     * A copy owns its own limiter and limits (still on the same store), so tuning or
+     * re-keying it — `Http::rateLimit($limit, by: ...)` does — leaves the original alone.
+     */
+    public function __clone()
+    {
+        $this->limiter = clone $this->limiter;
+    }
+
     public function getLimiter(): Limiter
     {
         return $this->limiter;
     }
 
     /**
-     * Enforce an additional window alongside the primary limit. Accepts a Limit,
-     * a RateLimit (its underlying limit is taken), or a list of either.
+     * Enforce additional windows alongside the primary limit. Accepts a Limit, a RateLimit
+     * (every window it enforces is taken), or a list of either. Copies are taken, so a later
+     * `by()` here never re-keys the limits you passed in.
      *
      * @param  Limit|RateLimit|list<Limit|RateLimit>  $limit
      */
     public function alongside(Limit|RateLimit|array $limit): static
     {
         foreach (is_array($limit) ? $limit : [$limit] as $entry) {
-            $this->limiter->addLimit(
-                $entry instanceof RateLimit ? $entry->getLimiter()->getLimit() : $entry,
-            );
+            foreach ($entry instanceof RateLimit ? $entry->getLimiter()->getLimits() : [$entry] as $window) {
+                $this->limiter->addLimit(clone $window);
+            }
         }
 
         return $this;
@@ -88,9 +98,15 @@ final class RateLimit
         return $this;
     }
 
+    /**
+     * Scope every window this limit enforces — the primary and each compound one — to
+     * `$key`, so owners never share any part of a budget.
+     */
     public function by(string $key): static
     {
-        $this->limiter->getLimit()->by($key);
+        foreach ($this->limiter->getLimits() as $limit) {
+            $limit->by($key);
+        }
 
         return $this;
     }

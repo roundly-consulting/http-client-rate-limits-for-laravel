@@ -318,8 +318,9 @@ final class Limiter
     }
 
     /**
-     * Spread the wait by the largest jitter configured on any enforced window,
-     * whichever window forced the wait.
+     * Lengthen the wait by up to the largest jitter configured on any enforced window,
+     * whichever window forced the wait. Jitter only ever adds: shortening a wait would send
+     * before the window frees.
      */
     protected function applyJitter(int $delay): int
     {
@@ -333,9 +334,7 @@ final class Limiter
             return $delay;
         }
 
-        $spread = $this->randomizer->between(-$jitter, $jitter);
-
-        return max($delay + $spread, 0);
+        return $delay + max($this->randomizer->between(0, $jitter), 0);
     }
 
     protected function shouldAdapt(): bool

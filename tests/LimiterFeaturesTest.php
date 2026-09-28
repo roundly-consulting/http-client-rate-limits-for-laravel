@@ -7,6 +7,7 @@ use Illuminate\Http\Client\Response;
 use RoundlyConsulting\HttpClientRateLimits\DataTransferObjects\AttemptResult;
 use RoundlyConsulting\HttpClientRateLimits\Deferrer\Deferrer;
 use RoundlyConsulting\HttpClientRateLimits\Exceptions\RateLimitExceededException;
+use RoundlyConsulting\HttpClientRateLimits\Jitter\Randomizer;
 use RoundlyConsulting\HttpClientRateLimits\Jitter\RandomRandomizer;
 use RoundlyConsulting\HttpClientRateLimits\Limit;
 use RoundlyConsulting\HttpClientRateLimits\Limiter;
@@ -197,7 +198,7 @@ it('adds deterministic jitter to the defer', function () {
     expect($delay)->toBe(1_040);
 });
 
-it('never produces a negative defer after jitter', function () {
+it('never shortens a wait with jitter, whatever the randomizer returns', function () {
     $store = new InMemoryStore;
     $store->hit('global:second', 1_000_000);
 
@@ -210,7 +211,7 @@ it('never produces a negative defer after jitter', function () {
 
     [$delay] = $limiter->strictestDelay(1_000_000);
 
-    expect($delay)->toBe(0);
+    expect($delay)->toBe(1_000);
 });
 
 it('enforces the max wait when a compound window is the bottleneck', function () {
@@ -468,6 +469,47 @@ it('ignores an X-RateLimit-Reset epoch that has already passed', function () {
 
     // A passed reset asks for no wait — never a ~57-year "delta".
     expect($store->penalizedUntil('api'))->toBeNull();
+});
+
+// Bug: jitter drew from [-jitter, +jitter], so its minus side sent before the window freed.
+it('never sends before the window frees, even with jitter at its minimum', function () {
+    $store = new InMemoryStore;
+    $deferrer = new TestDeferrer(1_000_000);
+    $lowest = new class implements Randomizer
+    {
+        public function between(int $min, int $max): int
+        {
+            return $min;
+        }
+    };
+
+    $limiter = new Limiter((new Limit('j', 1, 'second'))->jitter(50), $store, $deferrer, $lowest);
+
+    $limiter->handle(fn () => null);
+    $deferrer->defer(980, 'j');   // 20ms before the slot frees
+    $limiter->handle(fn () => null);
+
+    [$first, $second] = $store->hits('j:second');
+
+    expect($second - $first)->toBeGreaterThanOrEqual(1_000);
+});
+
+it('lengthens a wait by at most the jitter', function () {
+    $store = new InMemoryStore;
+    $store->hit('global:second', 1_000_000);
+    $highest = new class implements Randomizer
+    {
+        public function between(int $min, int $max): int
+        {
+            return $max;
+        }
+    };
+
+    $limiter = new Limiter((new Limit(maxAttempts: 1, timespan: 'second'))->jitter(50), $store, new TestDeferrer(1_000_000), $highest);
+
+    [$delay] = $limiter->strictestDelay(1_000_000);
+
+    expect($delay)->toBe(1_050);
 });
 
 // Bug: the wait was measured from the oldest hit even when the window held more than the max.

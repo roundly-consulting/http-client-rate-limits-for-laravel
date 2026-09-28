@@ -59,13 +59,13 @@ final class HttpClientRateLimitsServiceProvider extends PackageServiceProvider
 
             $middleware = match (true) {
                 $limit instanceof RateLimit => $limit,
-                $limit instanceof Limit => RateLimit::make($limit),
+                $limit instanceof Limit => $manager->make($limit),
                 is_array($limit) => $manager->compound(array_values(array_filter(
                     $limit,
                     static fn (mixed $entry): bool => $entry instanceof Limit || $entry instanceof RateLimit,
                 ))),
                 is_string($limit) => $manager->profile($limit), // named profile
-                default => RateLimit::perMinute($limit), // int shorthand = per-minute
+                default => $manager->perMinute($limit), // int shorthand = per-minute
             };
 
             if ($by !== null) {

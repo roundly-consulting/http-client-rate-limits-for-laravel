@@ -6,6 +6,7 @@ use RoundlyConsulting\HttpClientRateLimits\Deferrer\SleepDeferrer;
 use RoundlyConsulting\HttpClientRateLimits\Exceptions\InvalidDeferrerException;
 use RoundlyConsulting\HttpClientRateLimits\Exceptions\InvalidStoreException;
 use RoundlyConsulting\HttpClientRateLimits\Exceptions\UnknownLimiterProfileException;
+use RoundlyConsulting\HttpClientRateLimits\Facades\RateLimits;
 use RoundlyConsulting\HttpClientRateLimits\Limit;
 use RoundlyConsulting\HttpClientRateLimits\RateLimit;
 use RoundlyConsulting\HttpClientRateLimits\RateLimitManager;
@@ -113,7 +114,7 @@ it('throws when the profile config is not an array', function () {
 it('builds a compound rate limit from limits and rate limits', function () {
     $rateLimit = app(RateLimitManager::class)->compound([
         new Limit(maxAttempts: 5, timespan: 'second'),
-        RateLimit::perMinute(100),
+        RateLimits::perMinute(100),
     ]);
 
     expect($rateLimit->getLimiter()->getLimits())->toHaveCount(2)

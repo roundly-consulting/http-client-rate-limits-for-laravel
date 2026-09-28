@@ -7,6 +7,7 @@ use RoundlyConsulting\HttpClientRateLimits\Deferrer\SleepDeferrer;
 use RoundlyConsulting\HttpClientRateLimits\Exceptions\InvalidDeferrerException;
 use RoundlyConsulting\HttpClientRateLimits\Exceptions\InvalidStoreException;
 use RoundlyConsulting\HttpClientRateLimits\Exceptions\UndefinedMethodException;
+use RoundlyConsulting\HttpClientRateLimits\Facades\RateLimits;
 use RoundlyConsulting\HttpClientRateLimits\Limit;
 use RoundlyConsulting\HttpClientRateLimits\Limiter;
 use RoundlyConsulting\HttpClientRateLimits\RateLimit;
@@ -15,8 +16,8 @@ use RoundlyConsulting\HttpClientRateLimits\Store\RedisStore;
 use RoundlyConsulting\HttpClientRateLimits\Tests\TestDeferrer;
 use RoundlyConsulting\HttpClientRateLimits\Tests\TestStore;
 
-it('creates new instance using make static method', function () {
-    $instance = RateLimit::make(
+it('builds a rate limit from a Limit through the facade', function () {
+    $instance = RateLimits::make(
         $limit = new Limit('testing', 5, 'hour'),
     );
 
@@ -29,25 +30,11 @@ it('creates new instance using make static method', function () {
         ->getDeferrer()->toBeInstanceOf(SleepDeferrer::class);
 });
 
-it('configures default store and deferrer', function () {
-    RateLimit::use(new TestStore, new TestDeferrer);
-
-    $instance = RateLimit::make(
-        new Limit('testing', 5, 'hour'),
-    );
-
-    expect($instance)
-        ->getStore()->toBeInstanceOf(TestStore::class)
-        ->getDeferrer()->toBeInstanceOf(TestDeferrer::class);
-
-    RateLimit::use();
-});
-
 it('resolves default store and deferrer from config', function () {
     config()->set('http-client-rate-limits.store', TestStore::class);
     config()->set('http-client-rate-limits.deferrer', TestDeferrer::class);
 
-    $instance = RateLimit::make(new Limit('testing', 5, 'hour'));
+    $instance = RateLimits::make(new Limit('testing', 5, 'hour'));
 
     expect($instance)
         ->getStore()->toBeInstanceOf(TestStore::class)
@@ -58,13 +45,13 @@ it('resolves a redis store with the configured connection from config', function
     config()->set('http-client-rate-limits.store', RedisStore::class);
     config()->set('http-client-rate-limits.redis_connection', 'cache');
 
-    $instance = RateLimit::make(new Limit('testing', 5, 'hour'));
+    $instance = RateLimits::make(new Limit('testing', 5, 'hour'));
 
     expect($instance->getStore())->toBeInstanceOf(RedisStore::class);
 });
 
 it('falls back to in-memory store and sleep deferrer by default', function () {
-    $instance = RateLimit::make(new Limit('testing', 5, 'hour'));
+    $instance = RateLimits::make(new Limit('testing', 5, 'hour'));
 
     expect($instance)
         ->getStore()->toBeInstanceOf(InMemoryStore::class)
@@ -74,17 +61,17 @@ it('falls back to in-memory store and sleep deferrer by default', function () {
 it('throws when the configured store does not implement the Store contract', function () {
     config()->set('http-client-rate-limits.store', stdClass::class);
 
-    RateLimit::make(new Limit('testing', 5, 'hour'));
+    RateLimits::make(new Limit('testing', 5, 'hour'));
 })->throws(InvalidStoreException::class);
 
 it('throws when the configured deferrer does not implement the Deferrer contract', function () {
     config()->set('http-client-rate-limits.deferrer', stdClass::class);
 
-    RateLimit::make(new Limit('testing', 5, 'hour'));
+    RateLimits::make(new Limit('testing', 5, 'hour'));
 })->throws(InvalidDeferrerException::class);
 
-it('creates new instance using static method with per second limits', function () {
-    $instance = RateLimit::perSecond(5);
+it('creates new instance through the facade with per second limits', function () {
+    $instance = RateLimits::perSecond(5);
 
     expect($instance)
         ->toBeInstanceOf(RateLimit::class)
@@ -93,8 +80,8 @@ it('creates new instance using static method with per second limits', function (
         ->getTimespan()->toBe('second');
 });
 
-it('creates new instance using static method with per minute limits', function () {
-    $instance = RateLimit::perMinute(8);
+it('creates new instance through the facade with per minute limits', function () {
+    $instance = RateLimits::perMinute(8);
 
     expect($instance)
         ->toBeInstanceOf(RateLimit::class)
@@ -103,8 +90,8 @@ it('creates new instance using static method with per minute limits', function (
         ->getTimespan()->toBe('minute');
 });
 
-it('creates new instance using static method with per hour limits', function () {
-    $instance = RateLimit::perHour(4);
+it('creates new instance through the facade with per hour limits', function () {
+    $instance = RateLimits::perHour(4);
 
     expect($instance)
         ->toBeInstanceOf(RateLimit::class)
@@ -114,7 +101,7 @@ it('creates new instance using static method with per hour limits', function () 
 });
 
 it('forwards methods to underlying limit class or limiter class', function () {
-    $instance = RateLimit::perMinute(6);
+    $instance = RateLimits::perMinute(6);
 
     expect($instance)
         ->getMaxAttempts()->toBe(6)
@@ -125,8 +112,8 @@ it('forwards methods to underlying limit class or limiter class', function () {
         ->getDeferrer()->toBeInstanceOf(SleepDeferrer::class);
 });
 
-it('creates new instance using static method with per day limits', function () {
-    $instance = RateLimit::perDay(100);
+it('creates new instance through the facade with per day limits', function () {
+    $instance = RateLimits::perDay(100);
 
     expect($instance)
         ->toBeInstanceOf(RateLimit::class)
@@ -136,7 +123,7 @@ it('creates new instance using static method with per day limits', function () {
 });
 
 it('exposes explicit delegating methods that keep chaining on RateLimit', function () {
-    $instance = RateLimit::perMinute(6);
+    $instance = RateLimits::perMinute(6);
 
     expect($instance->by('john'))
         ->toBeInstanceOf(RateLimit::class)
@@ -153,7 +140,7 @@ it('exposes explicit delegating methods that keep chaining on RateLimit', functi
 });
 
 it('runs the limiter through the handle method', function () {
-    $instance = RateLimit::perMinute(2)->setStore(new TestStore)->setDeferrer(new TestDeferrer);
+    $instance = RateLimits::perMinute(2)->setStore(new TestStore)->setDeferrer(new TestDeferrer);
 
     $executed = false;
 
@@ -165,41 +152,19 @@ it('runs the limiter through the handle method', function () {
 });
 
 it('throws typed exception when no method is found on RateLimit instance or underlying limit / limiter class', function () {
-    $instance = RateLimit::perMinute(2);
+    $instance = RateLimits::perMinute(2);
 
     $instance->doesntExist();
 })->throws(UndefinedMethodException::class, 'Method [doesntExist] not found on RateLimit or Limiter class.');
 
-it('resolves remaining defaults statically when only one default is set', function () {
-    RateLimit::use(defaultStore: new TestStore);
-
-    $instance = RateLimit::perMinute(5);
-
-    expect($instance->getStore())->toBeInstanceOf(TestStore::class)
-        ->and($instance->getDeferrer())->toBeInstanceOf(SleepDeferrer::class);
-
-    RateLimit::use();
-});
-
-it('resolves the store statically when only a deferrer default is set', function () {
-    RateLimit::use(defaultDeferrer: new TestDeferrer);
-
-    $instance = RateLimit::perMinute(5);
-
-    expect($instance->getStore())->toBeInstanceOf(InMemoryStore::class)
-        ->and($instance->getDeferrer())->toBeInstanceOf(TestDeferrer::class);
-
-    RateLimit::use();
-});
-
 it('forwards an unmapped call to the underlying limiter', function () {
-    $instance = RateLimit::perMinute(5);
+    $instance = RateLimits::perMinute(5);
 
     expect($instance->getLimit())->toBeInstanceOf(Limit::class);
 });
 
 it('forwards an unmapped call to the underlying limit', function () {
-    $instance = RateLimit::perMinute(5);
+    $instance = RateLimits::perMinute(5);
 
     // maxAttempts lives on Limit, not RateLimit, so it goes through __call.
     $instance->maxAttempts(9, 'hour');
@@ -208,42 +173,10 @@ it('forwards an unmapped call to the underlying limit', function () {
         ->and($instance->getTimespan())->toBe('hour');
 });
 
-it('resolves a redis store via the static fallback path', function () {
-    RateLimit::use(defaultDeferrer: new TestDeferrer);
-    config()->set('http-client-rate-limits.store', RedisStore::class);
-    config()->set('http-client-rate-limits.redis_connection', 'cache');
-
-    expect(RateLimit::perMinute(5)->getStore())->toBeInstanceOf(RedisStore::class);
-
-    RateLimit::use();
-});
-
-it('throws via the static fallback when the store config is invalid', function () {
-    RateLimit::use(defaultDeferrer: new TestDeferrer);
-    config()->set('http-client-rate-limits.store', stdClass::class);
-
-    try {
-        RateLimit::perMinute(5);
-    } finally {
-        RateLimit::use();
-    }
-})->throws(InvalidStoreException::class);
-
-it('throws via the static fallback when the deferrer config is invalid', function () {
-    RateLimit::use(defaultStore: new TestStore);
-    config()->set('http-client-rate-limits.deferrer', stdClass::class);
-
-    try {
-        RateLimit::perMinute(5);
-    } finally {
-        RateLimit::use();
-    }
-})->throws(InvalidDeferrerException::class);
-
 it('return closure that works as guzzle request middleware and uses limiter', function () {
     $deferrer = new TestDeferrer;
 
-    $instance = RateLimit::perMinute();
+    $instance = RateLimits::perMinute();
     $instance->setDeferrer($deferrer);
 
     $request = $this->mock(RequestInterface::class);
@@ -276,4 +209,28 @@ it('return closure that works as guzzle request middleware and uses limiter', fu
         ->and($usedRequest)->toBe($request)
         ->and($usedOptions)->toBe(['My' => 'Options'])
         ->and($deferrer->timestamp())->toBe(60000);
+});
+
+// Regression: RateLimit::use() set process-global defaults that RateLimit::make()/per*()
+// read before the manager, so those limits bypassed a swapped manager and RateLimits::fake().
+// The manager is now the only way to build a limit.
+it('has no static entry point that could bypass the manager', function () {
+    $statics = array_map(
+        static fn (ReflectionMethod $method): string => $method->getName(),
+        (new ReflectionClass(RateLimit::class))->getMethods(ReflectionMethod::IS_STATIC),
+    );
+
+    expect($statics)->toBe([])
+        ->and((new ReflectionClass(RateLimit::class))->getStaticProperties())->toBe([]);
+});
+
+it('overrides only the store, or only the deferrer, per manager', function () {
+    $storeOnly = RateLimits::usingStore(new TestStore)->perMinute(5);
+    $deferrerOnly = RateLimits::usingDeferrer(new TestDeferrer)->perMinute(5);
+
+    expect($storeOnly->getStore())->toBeInstanceOf(TestStore::class)
+        ->and($storeOnly->getDeferrer())->toBeInstanceOf(SleepDeferrer::class)
+        ->and($deferrerOnly->getStore())->toBeInstanceOf(InMemoryStore::class)
+        ->and($deferrerOnly->getDeferrer())->toBeInstanceOf(TestDeferrer::class)
+        ->and(RateLimits::perMinute(5)->getStore())->toBeInstanceOf(InMemoryStore::class);
 });

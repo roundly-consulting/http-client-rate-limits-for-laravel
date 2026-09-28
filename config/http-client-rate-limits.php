@@ -31,7 +31,7 @@ return [
     |--------------------------------------------------------------------------
     |
     | The Store implementation used to record request timestamps for every
-    | RateLimit created with RateLimit::make()/perSecond()/perMinute()/perHour().
+    | RateLimit the manager builds (RateLimits::perMinute(), Http::rateLimit(), ...).
     | Ship with the in-process InMemoryStore, the CacheStore (shares limits via
     | any cache store the app already runs), or the RedisStore (strictly atomic,
     | shared across processes and servers). Must implement the

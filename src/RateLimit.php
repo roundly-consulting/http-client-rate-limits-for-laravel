@@ -7,80 +7,17 @@ namespace RoundlyConsulting\HttpClientRateLimits;
 use Closure;
 use Psr\Http\Message\RequestInterface;
 use RoundlyConsulting\HttpClientRateLimits\Deferrer\Deferrer;
-use RoundlyConsulting\HttpClientRateLimits\Enums\Timespan;
 use RoundlyConsulting\HttpClientRateLimits\Exceptions\UndefinedMethodException;
 use RoundlyConsulting\HttpClientRateLimits\Store\Store;
 
 /**
- * @phpstan-consistent-constructor
+ * Guzzle middleware (and a callback wrapper) enforcing one Limiter. Built by the manager —
+ * `RateLimits::perMinute(60)`, `Http::rateLimit(...)` — never statically, so there is one
+ * entry point and a faked manager sees every limit.
  */
 final class RateLimit
 {
-    protected static ?Store $defaultStore = null;
-
-    protected static ?Deferrer $defaultDeferrer = null;
-
     public function __construct(protected Limiter $limiter) {}
-
-    public static function use(?Store $defaultStore = null, ?Deferrer $defaultDeferrer = null): void
-    {
-        self::$defaultStore = $defaultStore;
-        self::$defaultDeferrer = $defaultDeferrer;
-    }
-
-    public static function make(Limit $limit): static
-    {
-        if (self::$defaultStore !== null && self::$defaultDeferrer !== null) {
-            return new self(new Limiter(
-                limit: $limit,
-                store: self::$defaultStore,
-                deferrer: self::$defaultDeferrer,
-            ));
-        }
-
-        // The container-bound manager owns the config-driven defaults (including
-        // the store every limit in the process shares) and honours a swapped fake.
-        /** @var RateLimitManager $manager */
-        $manager = app(RateLimitManager::class);
-
-        if (self::$defaultStore === null && self::$defaultDeferrer === null) {
-            return new self($manager->make($limit)->getLimiter());
-        }
-
-        return new self(new Limiter(
-            limit: $limit,
-            store: self::$defaultStore ?? $manager->store(),
-            deferrer: self::$defaultDeferrer ?? $manager->deferrer(),
-        ));
-    }
-
-    public static function perSecond(int $maxAttempts = 1): static
-    {
-        return self::make(
-            limit: new Limit(maxAttempts: $maxAttempts, timespan: Timespan::Second),
-        );
-    }
-
-    public static function perMinute(int $maxAttempts = 1): static
-    {
-        return self::make(
-            limit: new Limit(maxAttempts: $maxAttempts, timespan: Timespan::Minute),
-        );
-    }
-
-    public static function perHour(int $maxAttempts = 1): static
-    {
-        return self::make(
-            limit: new Limit(maxAttempts: $maxAttempts, timespan: Timespan::Hour),
-        );
-    }
-
-    public static function perDay(int $maxAttempts = 1): static
-    {
-        return self::make(
-            limit: new Limit(maxAttempts: $maxAttempts, timespan: Timespan::Day),
-        );
-    }
 
     public function getLimiter(): Limiter
     {

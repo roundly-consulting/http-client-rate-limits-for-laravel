@@ -5,7 +5,6 @@ declare(strict_types=1);
 use Illuminate\Support\Facades\Http;
 use RoundlyConsulting\HttpClientRateLimits\Facades\RateLimits;
 use RoundlyConsulting\HttpClientRateLimits\Limit;
-use RoundlyConsulting\HttpClientRateLimits\RateLimit;
 use RoundlyConsulting\HttpClientRateLimits\Store\InMemoryStore;
 use RoundlyConsulting\HttpClientRateLimits\Tests\TestDeferrer;
 
@@ -13,16 +12,12 @@ beforeEach(function () {
     Http::fake(['*' => Http::response('ok')]);
 });
 
-afterEach(function () {
-    RateLimit::use();
-});
-
 it('attaches a rate limit from a RateLimit instance', function () {
     $deferrer = new TestDeferrer;
-    RateLimit::use(new InMemoryStore, $deferrer);
+    rateLimitsUsing(new InMemoryStore, $deferrer);
 
-    Http::rateLimit(RateLimit::perMinute(1))->get('https://api.example.com/one');
-    Http::rateLimit(RateLimit::perMinute(1))->get('https://api.example.com/two');
+    Http::rateLimit(RateLimits::perMinute(1))->get('https://api.example.com/one');
+    Http::rateLimit(RateLimits::perMinute(1))->get('https://api.example.com/two');
 
     // Two calls against a per-minute budget of 1 forces the deferrer to wait.
     expect($deferrer->timestamp())->toBeGreaterThan(0);
@@ -30,7 +25,7 @@ it('attaches a rate limit from a RateLimit instance', function () {
 
 it('attaches a rate limit from a Limit value object', function () {
     $deferrer = new TestDeferrer;
-    RateLimit::use(new InMemoryStore, $deferrer);
+    rateLimitsUsing(new InMemoryStore, $deferrer);
 
     Http::rateLimit(new Limit(maxAttempts: 1, timespan: 'minute'))->get('https://api.example.com/one');
     Http::rateLimit(new Limit(maxAttempts: 1, timespan: 'minute'))->get('https://api.example.com/two');
@@ -40,7 +35,7 @@ it('attaches a rate limit from a Limit value object', function () {
 
 it('treats an integer shorthand as a per-minute limit', function () {
     $deferrer = new TestDeferrer;
-    RateLimit::use(new InMemoryStore, $deferrer);
+    rateLimitsUsing(new InMemoryStore, $deferrer);
 
     Http::rateLimit(1)->get('https://api.example.com/one');
     Http::rateLimit(1)->get('https://api.example.com/two');
@@ -51,7 +46,7 @@ it('treats an integer shorthand as a per-minute limit', function () {
 
 it('scopes the limit to an owner via the by argument', function () {
     $store = new InMemoryStore;
-    RateLimit::use($store, new TestDeferrer);
+    rateLimitsUsing($store, new TestDeferrer);
 
     Http::rateLimit(5, by: 'acct-1')->get('https://api.example.com/one');
 
@@ -80,9 +75,9 @@ it('resolves a named profile from a string', function () {
 it('enforces compound windows from an array', function () {
     $fake = RateLimits::fake();
 
-    Http::rateLimit([RateLimit::perSecond(5), RateLimit::perMinute(1)])
+    Http::rateLimit([RateLimits::perSecond(5), RateLimits::perMinute(1)])
         ->get('https://api.example.com/one');
-    Http::rateLimit([RateLimit::perSecond(5), RateLimit::perMinute(1)])
+    Http::rateLimit([RateLimits::perSecond(5), RateLimits::perMinute(1)])
         ->get('https://api.example.com/two');
 
     // The per-minute window of 1 forces the second call to be deferred.
@@ -93,19 +88,19 @@ it('enforces compound windows from an array', function () {
 
 it('counts each request once when stacked macro limits share an owner key', function () {
     $deferrer = new TestDeferrer(1_000_000);
-    RateLimit::use(new InMemoryStore, $deferrer);
+    rateLimitsUsing(new InMemoryStore, $deferrer);
 
     foreach (range(1, 5) as $ignored) {
-        Http::rateLimit(RateLimit::perSecond(5))
-            ->rateLimit(RateLimit::perMinute(100))
+        Http::rateLimit(RateLimits::perSecond(5))
+            ->rateLimit(RateLimits::perMinute(100))
             ->get('https://api.example.com/things');
     }
 
     // Five requests against 5/sec AND 100/min: neither budget is exhausted.
     expect($deferrer->timestamp())->toBe(1_000_000);
 
-    Http::rateLimit(RateLimit::perSecond(5))
-        ->rateLimit(RateLimit::perMinute(100))
+    Http::rateLimit(RateLimits::perSecond(5))
+        ->rateLimit(RateLimits::perMinute(100))
         ->get('https://api.example.com/things');
 
     expect($deferrer->timestamp())->toBe(1_001_000);

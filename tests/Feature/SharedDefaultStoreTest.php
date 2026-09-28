@@ -5,7 +5,6 @@ declare(strict_types=1);
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Sleep;
 use RoundlyConsulting\HttpClientRateLimits\Facades\RateLimits;
-use RoundlyConsulting\HttpClientRateLimits\RateLimit;
 use RoundlyConsulting\HttpClientRateLimits\RateLimitManager;
 use RoundlyConsulting\HttpClientRateLimits\Store\CacheStore;
 use RoundlyConsulting\HttpClientRateLimits\Store\InMemoryStore;
@@ -16,8 +15,6 @@ use RoundlyConsulting\HttpClientRateLimits\Tests\TestDeferrer;
  * process: a fresh InMemoryStore per `Http::rateLimit()` call would start every
  * request with an empty window, so the limit could never be reached.
  */
-
-afterEach(fn () => RateLimit::use());
 
 it('accumulates hits across separate Http::rateLimit calls with the default store', function () {
     Sleep::fake();
@@ -41,36 +38,29 @@ it('hands every manager-built rate limit the same default store', function () {
         ->and(RateLimits::store())->toBe($store);
 });
 
-it('builds RateLimit factories on the shared default store', function () {
-    expect(RateLimit::perMinute(1)->getStore())->toBe(RateLimit::perHour(5)->getStore())
-        ->and(RateLimit::perDay(1)->getStore())->toBe(app(RateLimitManager::class)->perSecond(2)->getStore());
-});
-
-it('shares the default store when only a default deferrer is set', function () {
-    RateLimit::use(defaultDeferrer: new TestDeferrer);
-
-    expect(RateLimit::perMinute(1)->getStore())->toBe(RateLimit::perSecond(5)->getStore());
+it('builds facade factories on the shared default store', function () {
+    expect(RateLimits::perMinute(1)->getStore())->toBe(RateLimits::perHour(5)->getStore())
+        ->and(RateLimits::perDay(1)->getStore())->toBe(app(RateLimitManager::class)->perSecond(2)->getStore());
 });
 
 it('resolves a new shared store when the configured store changes', function () {
-    $memory = RateLimit::perMinute(1)->getStore();
+    $memory = RateLimits::perMinute(1)->getStore();
 
     config()->set('http-client-rate-limits.store', CacheStore::class);
 
-    $cache = RateLimit::perMinute(1)->getStore();
+    $cache = RateLimits::perMinute(1)->getStore();
 
     expect($cache)->toBeInstanceOf(CacheStore::class)
         ->and($cache)->not->toBe($memory)
-        ->and(RateLimit::perSecond(3)->getStore())->toBe($cache);
+        ->and(RateLimits::perSecond(3)->getStore())->toBe($cache);
 });
 
-it('honours the cache store settings when only a default deferrer is set', function () {
-    RateLimit::use(defaultDeferrer: new TestDeferrer);
+it('honours the cache store settings when only the deferrer is overridden', function () {
     config()->set('http-client-rate-limits.store', CacheStore::class);
     config()->set('http-client-rate-limits.cache_store', 'array');
     config()->set('http-client-rate-limits.cache_prefix', 'custom');
 
-    $store = RateLimit::perMinute(5)->getStore();
+    $store = RateLimits::usingDeferrer(new TestDeferrer)->perMinute(5)->getStore();
 
     expect($store)->toBeInstanceOf(CacheStore::class)
         ->and($store->key('john'))->toBe('custom:john');

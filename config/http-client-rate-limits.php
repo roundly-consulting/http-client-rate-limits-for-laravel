@@ -32,9 +32,10 @@ return [
     |
     | The Store implementation used to record request timestamps for every
     | RateLimit the manager builds (RateLimits::perMinute(), Http::rateLimit(), ...).
-    | Ship with the in-process InMemoryStore, the CacheStore (shares limits via
-    | any cache store the app already runs), or the RedisStore (strictly atomic,
-    | shared across processes and servers). Must implement the
+    | Ship with the in-process InMemoryStore, or — to share limits across
+    | processes and servers — the CacheStore (any cache store the app already
+    | runs), the RedisStore, or the DatabaseStore. Each checks and records a
+    | request as one atomic step. Must implement the
     | RoundlyConsulting\HttpClientRateLimits\Store\Store contract.
     |
     */
@@ -81,6 +82,21 @@ return [
     */
 
     'redis_connection' => env('HTTP_CLIENT_RATE_LIMITS_REDIS_CONNECTION', 'default'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Database Connection
+    |--------------------------------------------------------------------------
+    |
+    | The database connection name (from config/database.php) the DatabaseStore
+    | uses when it is selected as the default store; null = the default
+    | connection. A dedicated connection keeps the store's short locking
+    | transactions out of any transaction your code has open. Ignored for any
+    | other store.
+    |
+    */
+
+    'database_connection' => env('HTTP_CLIENT_RATE_LIMITS_DATABASE_CONNECTION'),
 
     /*
     |--------------------------------------------------------------------------

@@ -31,7 +31,7 @@ final class ReleaseDeferrer implements Deferrer
         return now()->getTimestampMs();
     }
 
-    public function defer(int $ms): void
+    public function defer(int $ms, string $key): void
     {
         // Laravel's release() delay is in seconds; round up so we never re-run early.
         $seconds = (int) ceil($ms / 1000);

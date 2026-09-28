@@ -17,6 +17,7 @@ use RoundlyConsulting\HttpClientRateLimits\Exceptions\InvalidDeferrerException;
 use RoundlyConsulting\HttpClientRateLimits\Exceptions\InvalidStoreException;
 use RoundlyConsulting\HttpClientRateLimits\Exceptions\UnknownLimiterProfileException;
 use RoundlyConsulting\HttpClientRateLimits\Store\CacheStore;
+use RoundlyConsulting\HttpClientRateLimits\Store\DatabaseStore;
 use RoundlyConsulting\HttpClientRateLimits\Store\InMemoryStore;
 use RoundlyConsulting\HttpClientRateLimits\Store\RedisStore;
 use RoundlyConsulting\HttpClientRateLimits\Store\Store;
@@ -206,6 +207,13 @@ class RateLimitManager
                 store: $cacheStore,
                 prefix: $cachePrefix,
             );
+        }
+
+        if ($store === DatabaseStore::class) {
+            $connection = $this->config->get('http-client-rate-limits.database_connection');
+            $connection = is_string($connection) && $connection !== '' ? $connection : null;
+
+            return $this->resolvedStores[$store.'|'.$connection] ??= new DatabaseStore($connection);
         }
 
         return $this->resolvedStores[$store] ??= new $store;

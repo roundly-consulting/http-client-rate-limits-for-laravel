@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Carbon;
+use RoundlyConsulting\HttpClientRateLimits\DataTransferObjects\AttemptResult;
 use RoundlyConsulting\HttpClientRateLimits\Deferrer\SleepDeferrer;
 use RoundlyConsulting\HttpClientRateLimits\Limit;
 use RoundlyConsulting\HttpClientRateLimits\Limiter;
@@ -44,6 +45,11 @@ it('has getter and seter for store', function () {
 
     $anonymousStore = new class implements Store
     {
+        public function attempt(array $limits, int $timestamp): AttemptResult
+        {
+            return AttemptResult::allowed();
+        }
+
         public function hit(string $owner, int $timestamp): void
         {
             // Just testing

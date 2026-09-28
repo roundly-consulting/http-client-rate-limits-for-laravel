@@ -18,9 +18,8 @@ final class RateLimitHitFactory extends Factory
     public function definition(): array
     {
         return [
-            'owner' => 'global',
+            'owner' => 'global:second',
             'hit_at' => now()->getTimestampMs(),
-            'penalized_until' => null,
         ];
     }
 }

@@ -4,10 +4,16 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\HttpClientRateLimits\Tests;
 
+use RoundlyConsulting\HttpClientRateLimits\DataTransferObjects\AttemptResult;
 use RoundlyConsulting\HttpClientRateLimits\Store\Store;
 
 class TestStore implements Store
 {
+    public function attempt(array $limits, int $timestamp): AttemptResult
+    {
+        return AttemptResult::allowed();
+    }
+
     public function hit(string $owner, int $timestamp): void
     {
         //

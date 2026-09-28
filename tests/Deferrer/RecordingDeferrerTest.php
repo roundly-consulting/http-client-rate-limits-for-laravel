@@ -10,8 +10,8 @@ it('records defers and advances its clock instead of sleeping', function () {
     expect($deferrer->timestamp())->toBe(1_000)
         ->and($deferrer->deferCount())->toBe(0);
 
-    $deferrer->defer(500);
-    $deferrer->defer(250);
+    $deferrer->defer(500, 'global');
+    $deferrer->defer(250, 'global');
 
     expect($deferrer->defers())->toBe([500, 250])
         ->and($deferrer->deferCount())->toBe(2)

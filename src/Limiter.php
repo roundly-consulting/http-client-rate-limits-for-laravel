@@ -15,6 +15,7 @@ use RoundlyConsulting\HttpClientRateLimits\Exceptions\RateLimitExceededException
 use RoundlyConsulting\HttpClientRateLimits\Jitter\Randomizer;
 use RoundlyConsulting\HttpClientRateLimits\Jitter\RandomRandomizer;
 use RoundlyConsulting\HttpClientRateLimits\Store\Store;
+use RoundlyConsulting\HttpClientRateLimits\Support\Windows;
 
 final class Limiter
 {
@@ -108,55 +109,13 @@ final class Limiter
 
     public function handle(callable $callback): mixed
     {
-        $now = $this->deferrer->timestamp();
-
-        [$delay, $strictest] = $this->strictestDelay($now);
-
-        if ($delay > 0) {
-            $this->guardMaxWait($strictest, $delay);
-
-            $this->dispatch(new RequestDeferred(
-                key: $strictest->getKey(),
-                delayMs: $delay,
-                // The real count in the window that forced the wait (0 when a
-                // server penalty alone did), not the window's budget.
-                hitsInWindow: count($this->store->hitsSince(
-                    owner: $strictest->storeKey(),
-                    timestamp: $now - $strictest->timespanLengthInMs(),
-                )),
-                timespan: $strictest->getTimespanEnum(),
-            ));
-
-            $this->deferrer->defer($delay);
-        }
-
-        $timestamp = $this->deferrer->timestamp();
-
-        /** @var array<string, true> $recorded */
-        $recorded = [];
-
-        foreach ($this->getLimits() as $limit) {
-            $storeKey = $limit->storeKey();
-
-            // One hit per window series, however many limits read it.
-            if (! isset($recorded[$storeKey])) {
-                $this->store->hit($storeKey, $timestamp);
-                $recorded[$storeKey] = true;
-            }
-
-            if ($limit->shouldTrim()) {
-                $this->store->clear(
-                    owner: $storeKey,
-                    timestamp: $timestamp - $limit->timespanLengthInMs(),
-                );
-            }
-        }
+        $timestamp = $this->acquire();
 
         $this->dispatch(new RequestAllowed(
             key: $this->limit->getKey(),
             hitsInWindow: count($this->store->hitsSince(
                 owner: $this->limit->storeKey(),
-                timestamp: $timestamp - $this->limit->timespanLengthInMs(),
+                timestamp: Windows::since($this->limit, $timestamp),
             )),
             timespan: $this->limit->getTimespanEnum(),
         ));
@@ -183,8 +142,51 @@ final class Limiter
     }
 
     /**
-     * Delay (ms) before the *primary* limit allows another request. Preserved
-     * for backward compatibility — compound windows are evaluated in handle().
+     * Take a slot in every enforced window, waiting as long as the store says, and return
+     * the timestamp the hit was recorded at. Checking and recording are one atomic store
+     * step, and a wait is always followed by a fresh attempt — so workers sharing a store
+     * that wake for the same freed slot cannot both take it: the loser waits again.
+     */
+    protected function acquire(): int
+    {
+        $now = $this->deferrer->timestamp();
+        $waited = 0;
+
+        while (true) {
+            $attempt = $this->store->attempt($this->getLimits(), $now);
+
+            if ($attempt->allowed) {
+                return $now;
+            }
+
+            $window = $attempt->limit ?? $this->limit;
+
+            // A store that refuses without a wait would spin; step on by at least 1ms.
+            $delay = $this->applyJitter(max($attempt->delayMs, 1));
+
+            $this->guardMaxWait($window, $waited + $delay);
+
+            $this->dispatch(new RequestDeferred(
+                key: $window->getKey(),
+                delayMs: $delay,
+                // The real count in the window that forced the wait (0 when a
+                // server penalty alone did on an empty window), not its budget.
+                hitsInWindow: $attempt->hitsInWindow,
+                timespan: $window->getTimespanEnum(),
+            ));
+
+            $this->deferrer->defer($delay, $window->getKey());
+
+            $waited += $delay;
+
+            // A deferrer whose clock did not move on by the wait (a simulated sleep) is
+            // taken at its word; a real one that overslept is read as it is.
+            $now = max($this->deferrer->timestamp(), $now + $delay);
+        }
+    }
+
+    /**
+     * Delay (ms) before the *primary* limit allows another request.
      */
     public function delayUntilNextRequestInMs(int $currentAttemptTimestamp): int
     {
@@ -193,7 +195,8 @@ final class Limiter
 
     /**
      * The largest delay (ms) across every enforced window, plus jitter, with the
-     * limit that produced it so callers can attribute the wait.
+     * limit that produced it so callers can attribute the wait. A read-only preview:
+     * handle() takes the slot atomically through the store.
      *
      * @return array{0: int, 1: Limit}
      */
@@ -220,27 +223,15 @@ final class Limiter
 
     public function delayForLimit(Limit $limit, int $currentAttemptTimestamp): int
     {
-        $timespanLength = $limit->timespanLengthInMs();
-
-        $requestsInTimespan = $this->store->hitsSince(
+        $hits = $this->store->hitsSince(
             owner: $limit->storeKey(),
-            timestamp: $currentAttemptTimestamp - $timespanLength,
+            timestamp: Windows::since($limit, $currentAttemptTimestamp),
         );
 
-        $windowDelay = 0;
-
-        if (! $limit->isUnderMaxAttempts(count($requestsInTimespan)) && $requestsInTimespan !== []) {
-            // Wait out the oldest in-window request before the next is allowed.
-            $windowDelay = $timespanLength - ($currentAttemptTimestamp - $requestsInTimespan[0]);
-        }
-
-        $penalty = $this->store->penalizedUntil($limit->getKey());
-
-        if ($penalty !== null) {
-            $windowDelay = max($windowDelay, $penalty - $currentAttemptTimestamp);
-        }
-
-        return max($windowDelay, 0);
+        return max(
+            Windows::delay($limit, $hits, $currentAttemptTimestamp),
+            Windows::penaltyDelay($this->store->penalizedUntil($limit->getKey()), $currentAttemptTimestamp),
+        );
     }
 
     /**
@@ -253,9 +244,11 @@ final class Limiter
 
     public function remainingForLimit(Limit $limit): int
     {
+        $now = $this->deferrer->timestamp();
+
         $used = count($this->store->hitsSince(
             owner: $limit->storeKey(),
-            timestamp: $this->deferrer->timestamp() - $limit->timespanLengthInMs(),
+            timestamp: Windows::since($limit, $now),
         ));
 
         return max($limit->getMaxAttempts() - $used, 0);
@@ -299,9 +292,9 @@ final class Limiter
     }
 
     /**
-     * A max-wait set on any enforced window caps the whole wait — the tightest
-     * wins — so a ceiling on the primary still applies when a window it runs
-     * alongside is the bottleneck.
+     * A max-wait set on any enforced window caps the whole wait — every round of it
+     * together, the tightest ceiling winning — so a ceiling on the primary still applies
+     * when a window it runs alongside is the bottleneck.
      */
     protected function guardMaxWait(Limit $limit, int $delay): void
     {

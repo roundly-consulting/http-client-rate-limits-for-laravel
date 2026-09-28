@@ -89,9 +89,11 @@ it('reports the hit count of the compound window that forced the wait', function
 
     $limiter->handle(fn () => null);
 
+    // 3 hits against a budget of 2: the wait is for hit [3 - 2] (at 2000) to expire, so
+    // only one remains — waiting out the oldest alone would leave the window still full.
     Event::assertDispatched(RequestDeferred::class, fn (RequestDeferred $event): bool => $event->hitsInWindow === 3
         && $event->timespan === Timespan::Minute
-        && $event->delayMs === 51_000);
+        && $event->delayMs === 52_000);
 });
 
 it('reports zero hits when a server penalty alone forces the wait', function () {

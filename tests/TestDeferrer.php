@@ -15,7 +15,7 @@ class TestDeferrer implements Deferrer
         return $this->timestamp;
     }
 
-    public function defer(int $ms): void
+    public function defer(int $ms, string $key): void
     {
         $this->timestamp += $ms;
     }

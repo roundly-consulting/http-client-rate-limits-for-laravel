@@ -5,13 +5,15 @@ declare(strict_types=1);
 use Illuminate\Support\Facades\DB;
 use RoundlyConsulting\HttpClientRateLimits\HttpClientRateLimitsServiceProvider;
 use RoundlyConsulting\HttpClientRateLimits\Models\RateLimitHit;
+use RoundlyConsulting\HttpClientRateLimits\Models\RateLimitOwner;
 use RoundlyConsulting\PackageToolkit\Enums\DatabaseDriver;
 use RoundlyConsulting\Testing\Database\DriverMatrix;
 
 /**
- * This package ships exactly one CREATE and zero foreign keys — `http_client_rate_limits`
- * is keyed by an opaque `owner` string, deliberately unconstrained because the owner is
- * whatever the host chooses to bucket by (a host, a tenant, an API token).
+ * This package ships one migration file creating two tables and zero foreign keys —
+ * `http_client_rate_limits` (hits) and `http_client_rate_limit_owners` (the per-key lock
+ * row and penalty) are both keyed by an opaque `owner` string, deliberately unconstrained
+ * because the owner is whatever the host chooses to bucket by (a host, a tenant, an API token).
  *
  * That shape decides what is worth pinning here, and it is worth being explicit about why
  * two assertions are absent:
@@ -66,7 +68,7 @@ it('runs on the driver the environment declares', function (): void {
 });
 
 /**
- * The two `unsignedBigInteger` millisecond timestamps are the columns the drivers can
+ * The three `unsignedBigInteger` millisecond timestamps are the columns the drivers can
  * genuinely disagree on: SQLite reports `unsignedBigInteger()` and `integer()` alike as
  * `integer` and would not notice a 32-bit downgrade — which matters here more than most,
  * because a millisecond epoch overflows a 32-bit signed integer (in 1970 + 24 days of
@@ -77,14 +79,18 @@ it('round-trips a millisecond timestamp too wide for a 32-bit column', function 
     $farFuture = 4_102_444_800_000; // 2100-01-01 in ms — far beyond 2^31.
 
     $hit = RateLimitHit::query()->create([
-        'owner' => 'acme',
+        'owner' => 'acme:second',
         'hit_at' => $farFuture,
-        'penalized_until' => $farFuture,
     ]);
 
-    $fresh = $hit->fresh();
+    $owner = RateLimitOwner::query()->create([
+        'owner' => 'acme',
+        'penalized_until' => $farFuture,
+        'touched_at' => $farFuture,
+    ]);
 
-    expect((int) $fresh->hit_at)->toBe($farFuture)
-        ->and((int) $fresh->penalized_until)->toBe($farFuture)
+    expect((int) $hit->fresh()?->hit_at)->toBe($farFuture)
+        ->and((int) $owner->fresh()?->penalized_until)->toBe($farFuture)
+        ->and((int) $owner->fresh()?->touched_at)->toBe($farFuture)
         ->and(DB::connection()->getDriverName())->toBe(DriverMatrix::driver());
 });

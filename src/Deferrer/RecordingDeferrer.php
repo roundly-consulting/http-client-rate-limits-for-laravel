@@ -26,7 +26,7 @@ final class RecordingDeferrer implements Deferrer
         return $this->now;
     }
 
-    public function defer(int $ms): void
+    public function defer(int $ms, string $key): void
     {
         $this->defers[] = $ms;
         $this->now += $ms;

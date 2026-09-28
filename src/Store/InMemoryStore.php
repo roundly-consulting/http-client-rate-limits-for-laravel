@@ -4,11 +4,17 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\HttpClientRateLimits\Store;
 
+use RoundlyConsulting\HttpClientRateLimits\DataTransferObjects\AttemptResult;
+use RoundlyConsulting\HttpClientRateLimits\Support\Windows;
+
 /**
  * Keeps hits in process memory. One instance is shared by every rate limit the
  * app builds (see RateLimitManager), so limits accumulate across calls within a
  * process — but never between processes: use the CacheStore, RedisStore or
  * DatabaseStore when several workers must share a budget.
+ *
+ * `attempt()` is atomic by construction: PHP runs it start to finish in one process,
+ * and nothing outside that process can see this store.
  */
 final class InMemoryStore implements Store
 {
@@ -21,13 +27,46 @@ final class InMemoryStore implements Store
     /** @var array<string, int> */
     protected array $penalties = [];
 
+    public function attempt(array $limits, int $timestamp): AttemptResult
+    {
+        $result = Windows::evaluate(
+            $limits,
+            $timestamp,
+            $this->hitsSince(...),
+            $this->penalizedUntil(...),
+        );
+
+        if (! $result->allowed) {
+            return $result;
+        }
+
+        foreach (Windows::storeKeys($limits) as $storeKey) {
+            $this->hit($storeKey, $timestamp);
+        }
+
+        foreach ($limits as $limit) {
+            if ($limit->shouldTrim()) {
+                $this->clear($limit->storeKey(), $timestamp - $limit->timespanLengthInMs());
+            }
+        }
+
+        return $result;
+    }
+
     public function hit(string $owner, int $timestamp): void
     {
         $hits = $this->timestamps[$owner] ?? [];
         $hits[] = $timestamp;
 
+        // Keep the list oldest-first even when a hit arrives out of order (another clock).
+        $count = count($hits);
+
+        if ($count > 1 && $hits[$count - 2] > $timestamp) {
+            sort($hits);
+        }
+
         // Drop entries older than the largest window so a long-lived, shared
-        // store stays bounded (hits arrive in order, so check the oldest first).
+        // store stays bounded (the list is ordered, so check the oldest first).
         $oldest = $timestamp - self::RETENTION_MS;
 
         if ($hits[0] < $oldest) {

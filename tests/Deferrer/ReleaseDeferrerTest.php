@@ -35,7 +35,7 @@ it('releases the job with the delay in seconds and throws to unwind', function (
 
     try {
         // 4200ms rounds up to 5 seconds.
-        $deferrer->defer(4_200);
+        $deferrer->defer(4_200, 'global');
         $this->fail('Expected JobReleasedException.');
     } catch (JobReleasedException $e) {
         expect($job->released)->toBe(5)

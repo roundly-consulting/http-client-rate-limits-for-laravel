@@ -136,3 +136,12 @@ it('records and reads penalties keeping the latest', function () {
     $store->penalizeUntil('john', 9_000);
     expect($store->penalizedUntil('john'))->toBe(9_000);
 });
+
+it('keeps hits oldest-first when one arrives out of order', function () {
+    $store = new CacheStore(store: 'array');
+
+    $store->hit('john', 20);
+    $store->hit('john', 10);
+
+    expect($store->hits('john'))->toBe([10, 20]);
+});

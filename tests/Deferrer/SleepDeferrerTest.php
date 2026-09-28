@@ -21,7 +21,7 @@ it('defer using sleep in ms', function () {
 
     Sleep::fake();
 
-    $deferrer->defer(500);
+    $deferrer->defer(500, 'global');
 
     Sleep::assertSleptTimes(1);
 

@@ -16,15 +16,13 @@ it('creates a hit through the factory', function () {
         ->and($hit->getTable())->toBe('http_client_rate_limits');
 });
 
-it('casts the timestamp columns to integers', function () {
+it('casts the timestamp column to an integer', function () {
     $hit = RateLimitHit::factory()->create([
         'owner' => 'acme',
         'hit_at' => '1500',
-        'penalized_until' => '2500',
     ]);
 
-    expect($hit->refresh()->hit_at)->toBe(1_500)
-        ->and($hit->penalized_until)->toBe(2_500);
+    expect($hit->refresh()->hit_at)->toBe(1_500);
 });
 
 it('soft deletes', function () {

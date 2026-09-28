@@ -87,3 +87,13 @@ it('keeps hits inside the retention window', function () {
 
     expect($store->hits('john'))->toBe([1_000, 1_000 + 86_400_000]);
 });
+
+it('keeps hits oldest-first when one arrives out of order', function () {
+    $store = new InMemoryStore;
+
+    $store->hit('john', 20);
+    $store->hit('john', 10);
+    $store->hit('john', 30);
+
+    expect($store->hits('john'))->toBe([10, 20, 30]);
+});

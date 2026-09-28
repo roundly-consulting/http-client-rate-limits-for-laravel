@@ -11,6 +11,8 @@ use RoundlyConsulting\HttpClientRateLimits\Facades\RateLimits;
 use RoundlyConsulting\HttpClientRateLimits\Limit;
 use RoundlyConsulting\HttpClientRateLimits\Limiter;
 use RoundlyConsulting\HttpClientRateLimits\RateLimit;
+use RoundlyConsulting\HttpClientRateLimits\RateLimitManager;
+use RoundlyConsulting\HttpClientRateLimits\Store\DatabaseStore;
 use RoundlyConsulting\HttpClientRateLimits\Store\InMemoryStore;
 use RoundlyConsulting\HttpClientRateLimits\Store\RedisStore;
 use RoundlyConsulting\HttpClientRateLimits\Tests\TestDeferrer;
@@ -234,3 +236,17 @@ it('overrides only the store, or only the deferrer, per manager', function () {
         ->and($deferrerOnly->getDeferrer())->toBeInstanceOf(TestDeferrer::class)
         ->and(RateLimits::perMinute(5)->getStore())->toBeInstanceOf(InMemoryStore::class);
 });
+
+it('resolves a database store on the configured connection from config', function (?string $configured, ?string $expected) {
+    config()->set('http-client-rate-limits.store', DatabaseStore::class);
+    config()->set('http-client-rate-limits.database_connection', $configured);
+
+    $store = app(RateLimitManager::class)->store();
+
+    expect($store)->toBeInstanceOf(DatabaseStore::class)
+        ->and((fn () => $this->connection)->call($store))->toBe($expected);
+})->with([
+    'named' => ['rate-limits', 'rate-limits'],
+    'default' => [null, null],
+    'empty env' => ['', null],
+]);

@@ -13,7 +13,7 @@ final class SleepDeferrer implements Deferrer
         return now()->getTimestampMs();
     }
 
-    public function defer(int $ms): void
+    public function defer(int $ms, string $key): void
     {
         Sleep::usleep($ms * 1000);
     }

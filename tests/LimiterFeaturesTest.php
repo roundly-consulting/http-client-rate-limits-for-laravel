@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use GuzzleHttp\Psr7\Response as PsrResponse;
 use Illuminate\Http\Client\Response;
+use RoundlyConsulting\HttpClientRateLimits\DataTransferObjects\AttemptResult;
+use RoundlyConsulting\HttpClientRateLimits\Deferrer\Deferrer;
 use RoundlyConsulting\HttpClientRateLimits\Exceptions\RateLimitExceededException;
 use RoundlyConsulting\HttpClientRateLimits\Jitter\RandomRandomizer;
 use RoundlyConsulting\HttpClientRateLimits\Limit;
@@ -11,6 +13,7 @@ use RoundlyConsulting\HttpClientRateLimits\Limiter;
 use RoundlyConsulting\HttpClientRateLimits\Store\InMemoryStore;
 use RoundlyConsulting\HttpClientRateLimits\Tests\FixedRandomizer;
 use RoundlyConsulting\HttpClientRateLimits\Tests\TestDeferrer;
+use RoundlyConsulting\HttpClientRateLimits\Tests\TestStore;
 
 it('exposes a getter and setter for the randomizer', function () {
     $limiter = new Limiter(
@@ -120,7 +123,7 @@ it('keeps a longer window intact when a shorter window on the same key trims', f
 
     foreach (range(1, 3) as $ignored) {
         $limiter->handle(fn () => null);
-        $deferrer->defer(2_000); // space the calls out past the 1-second window
+        $deferrer->defer(2_000, 'global'); // space the calls out past the 1-second window
     }
 
     $limiter->handle(fn () => null);
@@ -465,4 +468,72 @@ it('ignores an X-RateLimit-Reset epoch that has already passed', function () {
 
     // A passed reset asks for no wait — never a ~57-year "delta".
     expect($store->penalizedUntil('api'))->toBeNull();
+});
+
+// Bug: the wait was measured from the oldest hit even when the window held more than the max.
+it('waits until an over-full window is back within budget before sending', function () {
+    $store = new InMemoryStore;
+    $deferrer = new TestDeferrer(1_000_040);
+
+    // 4 hits in the last second (e.g. a key shared with a larger limit) against 2/sec.
+    foreach ([0, 10, 20, 30] as $offset) {
+        $store->hit('o:second', 1_000_000 + $offset);
+    }
+
+    (new Limiter(new Limit('o', 2, 'second'), $store, $deferrer))->handle(fn () => null);
+
+    $hits = $store->hits('o:second');
+    $sentAt = end($hits);
+    $trailing = array_filter($hits, static fn (int $hit): bool => $hit > $sentAt - 1_000);
+
+    expect($sentAt)->toBe(1_001_020)
+        ->and(count($trailing))->toBe(2);
+});
+
+it('keeps waiting while a store refuses without a delay', function () {
+    $deferrer = new TestDeferrer(1_000);
+    $store = new class extends TestStore
+    {
+        public int $attempts = 0;
+
+        public function attempt(array $limits, int $timestamp): AttemptResult
+        {
+            return ++$this->attempts < 3
+                ? AttemptResult::deferred(0, $limits[0], 0)
+                : AttemptResult::allowed();
+        }
+    };
+
+    (new Limiter(new Limit('spin', 1, 'second'), $store, $deferrer))->handle(fn () => null);
+
+    // Each refusal steps on by at least 1ms instead of spinning in place.
+    expect($store->attempts)->toBe(3)
+        ->and($deferrer->timestamp())->toBe(1_002);
+});
+
+it('takes a deferrer that did not move its clock at its word', function () {
+    $store = new InMemoryStore;
+    $frozen = new class implements Deferrer
+    {
+        /** @var list<int> */
+        public array $defers = [];
+
+        public function timestamp(): int
+        {
+            return 5_000;
+        }
+
+        public function defer(int $ms, string $key): void
+        {
+            $this->defers[] = $ms;
+        }
+    };
+
+    $limiter = new Limiter(new Limit('frozen', 1, 'second'), $store, $frozen);
+    $limiter->handle(fn () => null);
+    $limiter->handle(fn () => null);
+
+    // One simulated wait, then the hit lands where the wait said the slot frees.
+    expect($frozen->defers)->toBe([1_000])
+        ->and($store->hits('frozen:second'))->toBe([5_000, 6_000]);
 });

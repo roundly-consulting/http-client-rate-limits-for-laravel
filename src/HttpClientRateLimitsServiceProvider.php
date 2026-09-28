@@ -7,6 +7,7 @@ namespace RoundlyConsulting\HttpClientRateLimits;
 use Illuminate\Http\Client\PendingRequest;
 use RoundlyConsulting\PackageToolkit\Package;
 use RoundlyConsulting\PackageToolkit\PackageServiceProvider;
+use RoundlyConsulting\PackageToolkit\Support\Config;
 
 final class HttpClientRateLimitsServiceProvider extends PackageServiceProvider
 {
@@ -24,7 +25,7 @@ final class HttpClientRateLimitsServiceProvider extends PackageServiceProvider
                     'Store' => self::classLabel(config('http-client-rate-limits.store')),
                     'Deferrer' => self::classLabel(config('http-client-rate-limits.deferrer')),
                     'Limiter profiles' => (string) count($limiters),
-                    'Events' => config('http-client-rate-limits.events_enabled') === false ? 'OFF' : 'ENABLED',
+                    'Events' => Config::boolean('http-client-rate-limits.events_enabled', true) ? 'ENABLED' : 'OFF',
                 ];
             });
     }

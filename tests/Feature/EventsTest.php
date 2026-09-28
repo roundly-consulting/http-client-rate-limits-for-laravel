@@ -147,3 +147,22 @@ it('suppresses events when the config flag is disabled', function () {
     Event::assertNotDispatched(RequestAllowed::class);
     Event::assertNotDispatched(RequestDeferred::class);
 });
+
+it('reads events_enabled from an env-style string', function (string $value, bool $dispatched) {
+    Event::fake();
+    config()->set('http-client-rate-limits.events_enabled', $value);
+
+    (new Limiter(new Limit(maxAttempts: 5, timespan: Timespan::Minute), new InMemoryStore, new TestDeferrer))
+        ->handle(fn () => null);
+
+    expect(Event::dispatched(RequestAllowed::class))->toHaveCount($dispatched ? 1 : 0);
+})->with([
+    ['off', false],
+    ['no', false],
+    ['0', false],
+    ['false', false],
+    ['on', true],
+    ['yes', true],
+    ['1', true],
+    ['true', true],
+]);

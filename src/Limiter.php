@@ -16,6 +16,7 @@ use RoundlyConsulting\HttpClientRateLimits\Jitter\Randomizer;
 use RoundlyConsulting\HttpClientRateLimits\Jitter\RandomRandomizer;
 use RoundlyConsulting\HttpClientRateLimits\Store\Store;
 use RoundlyConsulting\HttpClientRateLimits\Support\Windows;
+use RoundlyConsulting\PackageToolkit\Support\Config;
 
 final class Limiter
 {
@@ -458,6 +459,6 @@ final class Limiter
             return false;
         }
 
-        return (bool) config('http-client-rate-limits.events_enabled', true);
+        return Config::boolean('http-client-rate-limits.events_enabled', true);
     }
 }

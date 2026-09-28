@@ -75,3 +75,12 @@ it('honours the cache store settings when only a default deferrer is set', funct
     expect($store)->toBeInstanceOf(CacheStore::class)
         ->and($store->key('john'))->toBe('custom:john');
 });
+
+// Regression: a using*() copy cloned the resolved-store map, so its limits on the default
+// in-memory store started from an empty window every time.
+it('shares the default store when only the deferrer is overridden', function () {
+    $manager = RateLimits::usingDeferrer(new TestDeferrer);
+
+    expect($manager->perMinute(1)->getStore())->toBe($manager->perSecond(5)->getStore())
+        ->and($manager->perMinute(1)->getStore())->toBe(RateLimits::store());
+});

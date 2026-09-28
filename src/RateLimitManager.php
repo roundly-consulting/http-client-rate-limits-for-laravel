@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\HttpClientRateLimits;
 
+use ArrayObject;
 use Illuminate\Contracts\Config\Repository;
 use RoundlyConsulting\HttpClientRateLimits\DataTransferObjects\LimiterProfileData;
 use RoundlyConsulting\HttpClientRateLimits\Deferrer\Deferrer;
@@ -22,9 +23,10 @@ use RoundlyConsulting\HttpClientRateLimits\Store\Store;
  * as a singleton so a facade can resolve it and the host can override defaults.
  *
  * The configured store is resolved once per configuration and shared by every
- * rate limit this manager builds, so hits accumulate across separate calls in
- * the same process. The default InMemoryStore is therefore per-process only —
- * use the CacheStore, RedisStore or DatabaseStore to share limits between workers.
+ * rate limit this manager (or any `using*()` copy of it) builds, so hits accumulate
+ * across separate calls in the same process. The default InMemoryStore is therefore
+ * per-process only — use the CacheStore, RedisStore or DatabaseStore to share limits
+ * between workers.
  */
 class RateLimitManager
 {
@@ -34,13 +36,20 @@ class RateLimitManager
 
     /**
      * Stores resolved from config, keyed by their configuration, shared for the
-     * lifetime of this (singleton) manager.
+     * lifetime of this (singleton) manager — and with every `using*()` / `releasingJob()`
+     * copy of it: an object, so a clone keeps pointing at the same map.
      *
-     * @var array<string, Store>
+     * @var ArrayObject<string, Store>
      */
-    private array $resolvedStores = [];
+    private readonly ArrayObject $resolvedStores;
 
-    public function __construct(private readonly Repository $config) {}
+    public function __construct(private readonly Repository $config)
+    {
+        /** @var ArrayObject<string, Store> $stores */
+        $stores = new ArrayObject;
+
+        $this->resolvedStores = $stores;
+    }
 
     public function usingStore(Store $store): self
     {

@@ -6,8 +6,11 @@ namespace RoundlyConsulting\HttpClientRateLimits;
 
 use ArrayObject;
 use Illuminate\Contracts\Config\Repository;
+use Illuminate\Http\Client\RequestException;
+use Illuminate\Http\Client\Response;
 use RoundlyConsulting\HttpClientRateLimits\DataTransferObjects\LimiterProfileData;
 use RoundlyConsulting\HttpClientRateLimits\Deferrer\Deferrer;
+use RoundlyConsulting\HttpClientRateLimits\Deferrer\ReleaseDeferrer;
 use RoundlyConsulting\HttpClientRateLimits\Deferrer\SleepDeferrer;
 use RoundlyConsulting\HttpClientRateLimits\Enums\Timespan;
 use RoundlyConsulting\HttpClientRateLimits\Exceptions\InvalidDeferrerException;
@@ -19,8 +22,9 @@ use RoundlyConsulting\HttpClientRateLimits\Store\RedisStore;
 use RoundlyConsulting\HttpClientRateLimits\Store\Store;
 
 /**
- * Resolves the configured store/deferrer and builds RateLimit middleware. Bound
- * as a singleton so a facade can resolve it and the host can override defaults.
+ * The package's single entry point (the `RateLimits` facade root): resolves the configured
+ * store/deferrer and builds RateLimit middleware. Bound as a singleton so the facade and
+ * injected code share it and the host can override defaults.
  *
  * The configured store is resolved once per configuration and shared by every
  * rate limit this manager (or any `using*()` copy of it) builds, so hits accumulate
@@ -66,6 +70,25 @@ class RateLimitManager
         $clone->deferrer = $deferrer;
 
         return $clone;
+    }
+
+    /**
+     * The same manager, deferring by releasing a queued job back onto the queue instead of
+     * sleeping the worker. `$job` exposes Laravel's `release(int $seconds)` (e.g. it uses
+     * `InteractsWithQueue`); the attempt unwinds with a `JobReleasedException`.
+     */
+    public function releasingJob(object $job): self
+    {
+        return $this->usingDeferrer(new ReleaseDeferrer($job));
+    }
+
+    /**
+     * Seconds a server's `Retry-After` header asks for (delta-seconds or an HTTP-date), or
+     * null when it is absent or unparseable.
+     */
+    public function retryAfter(Response|RequestException $response): ?int
+    {
+        return RetryAfter::seconds($response);
     }
 
     public function make(Limit $limit): RateLimit

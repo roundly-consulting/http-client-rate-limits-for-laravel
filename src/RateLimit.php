@@ -77,6 +77,17 @@ final class RateLimit
         return $this->limiter->tooManyAttempts();
     }
 
+    /**
+     * Forget the hits every enforced window recorded for this key, so the next request goes
+     * straight through. A server-imposed (adaptive) penalty is not lifted.
+     */
+    public function reset(): static
+    {
+        $this->limiter->reset();
+
+        return $this;
+    }
+
     public function by(string $key): static
     {
         $this->limiter->getLimit()->by($key);

@@ -8,6 +8,7 @@ use GuzzleHttp\Promise\PromiseInterface;
 use Illuminate\Http\Client\Response;
 use Psr\Http\Message\ResponseInterface;
 use RoundlyConsulting\HttpClientRateLimits\Deferrer\Deferrer;
+use RoundlyConsulting\HttpClientRateLimits\Events\RateLimitReset;
 use RoundlyConsulting\HttpClientRateLimits\Events\RequestAllowed;
 use RoundlyConsulting\HttpClientRateLimits\Events\RequestDeferred;
 use RoundlyConsulting\HttpClientRateLimits\Exceptions\RateLimitExceededException;
@@ -277,6 +278,27 @@ final class Limiter
     }
 
     /**
+     * Forget every hit the enforced windows recorded, so the next request is allowed at
+     * once. A server-imposed penalty (adaptive mode) stays: the server asked for the wait.
+     */
+    public function reset(): void
+    {
+        /** @var array<string, true> $cleared */
+        $cleared = [];
+
+        foreach ($this->getLimits() as $limit) {
+            $storeKey = $limit->storeKey();
+
+            if (! isset($cleared[$storeKey])) {
+                $this->store->clear(owner: $storeKey, timestamp: PHP_INT_MAX);
+                $cleared[$storeKey] = true;
+            }
+        }
+
+        $this->dispatch(new RateLimitReset(key: $this->limit->getKey()));
+    }
+
+    /**
      * A max-wait set on any enforced window caps the whole wait — the tightest
      * wins — so a ceiling on the primary still applies when a window it runs
      * alongside is the bottleneck.
@@ -408,7 +430,7 @@ final class Limiter
         return $resetValue >= self::EPOCH_THRESHOLD_SECONDS ? 0 : $resetValue;
     }
 
-    protected function dispatch(RequestDeferred|RequestAllowed $event): void
+    protected function dispatch(RequestDeferred|RequestAllowed|RateLimitReset $event): void
     {
         if (! $this->eventsEnabled()) {
             return;

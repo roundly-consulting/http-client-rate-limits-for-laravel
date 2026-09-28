@@ -6,6 +6,7 @@ namespace RoundlyConsulting\HttpClientRateLimits\Facades;
 
 use Illuminate\Support\Facades\Facade;
 use RoundlyConsulting\HttpClientRateLimits\Deferrer\Deferrer;
+use RoundlyConsulting\HttpClientRateLimits\Events\RateLimitReset;
 use RoundlyConsulting\HttpClientRateLimits\Events\RequestAllowed;
 use RoundlyConsulting\HttpClientRateLimits\Events\RequestDeferred;
 use RoundlyConsulting\HttpClientRateLimits\Limit;
@@ -24,6 +25,8 @@ use RoundlyConsulting\HttpClientRateLimits\Testing\RateLimitsFake;
  * @method static RateLimit perDay(int $maxAttempts = 1)
  * @method static RateLimitManager usingStore(Store $store)
  * @method static RateLimitManager usingDeferrer(Deferrer $deferrer)
+ * @method static RateLimitManager releasingJob(object $job)
+ * @method static int|null retryAfter(\Illuminate\Http\Client\Response|\Illuminate\Http\Client\RequestException $response)
  * @method static Store store()
  * @method static Deferrer deferrer()
  *
@@ -38,7 +41,7 @@ final class RateLimits extends Facade
 
     /**
      * Swap the manager for a recording fake that never sleeps, so tests can
-     * assert on throttling without real waits or Redis.
+     * assert on throttling without real waits or Redis. Injected managers get it too.
      */
     public static function fake(): RateLimitsFake
     {
@@ -53,10 +56,9 @@ final class RateLimits extends Facade
         $events = $app->make('events');
         $events->listen(RequestDeferred::class, $fake->recordDeferred(...));
         $events->listen(RequestAllowed::class, $fake->recordAllowed(...));
+        $events->listen(RateLimitReset::class, $fake->recordReset(...));
 
-        $app->instance(RateLimitManager::class, $fake);
-
-        self::clearResolvedInstance(RateLimitManager::class);
+        self::swap($fake);
 
         return $fake;
     }

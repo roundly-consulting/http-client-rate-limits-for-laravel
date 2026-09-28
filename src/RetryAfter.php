@@ -10,9 +10,10 @@ use Illuminate\Http\Client\Response;
 use Illuminate\Support\Carbon;
 
 /**
- * Parses the standard `Retry-After` header so consumers can honour server-sent
- * backoff (e.g. feed it into Laravel's own `->retry()` sleep callback). The
- * header is either delta-seconds or an HTTP-date (RFC 7231).
+ * Parses the standard `Retry-After` header: delta-seconds or an HTTP-date (RFC 7231).
+ * Hosts call `RateLimits::retryAfter()`; the adaptive limiter uses this directly.
+ *
+ * @internal
  */
 final class RetryAfter
 {

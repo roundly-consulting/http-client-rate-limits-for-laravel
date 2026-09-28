@@ -105,6 +105,12 @@ ArchPresets::runtimeRequireIsWhitelisted(__DIR__.'/../composer.json');
 
 ArchPresets::noDebuggingLeftovers();
 
+/**
+ * One path: the package's one model (RateLimitHit, the DatabaseStore's row) must never reach
+ * past the manager. There is no src/Actions today, so this guards the day one appears.
+ */
+ArchPresets::modelsGoThroughTheFacade('RoundlyConsulting\HttpClientRateLimits');
+
 it('extends the base exception for every package exception')
     ->expect('RoundlyConsulting\HttpClientRateLimits\Exceptions')
     ->toExtend(RateLimitException::class);

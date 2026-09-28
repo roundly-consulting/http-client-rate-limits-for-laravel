@@ -38,20 +38,21 @@ limit is reached, so you never blow past a third-party API's quota.
 - **Jitter / spread** — `->jitter(ms)` adds randomised wait to avoid thundering-herd
   alignment (the randomness source is injectable for deterministic tests).
 - **Pre-flight inspection** — `remaining()`, `availableIn()`, `tooManyAttempts()` from the
-  fluent surface.
-- **Queue-aware deferrer** — `ReleaseDeferrer` releases a queued job back onto the queue
-  (with the computed delay) instead of blocking the worker.
+  fluent surface, and `reset()` to clear a key's recorded hits.
+- **Queue-aware deferrer** — `RateLimits::releasingJob($job)` releases a queued job back onto
+  the queue (with the computed delay) instead of blocking the worker.
 - **Testing fake** — `RateLimits::fake()` plus `assertDeferred()`, `assertAllowed()`,
-  `assertNothingDeferred()` to test throttling without real sleeps or Redis.
+  `assertReset()` and their `assertNothing…()` twins to test throttling without real sleeps or
+  Redis.
 - Pluggable **Store** (where request timestamps are kept) and **Deferrer** (how the wait is
   performed). Ships an in-process `InMemoryStore`, a `CacheStore` (shared via any cache the
   app already runs — no Redis required), a strictly-atomic `RedisStore`, a `DatabaseStore`
   (for apps with no Redis), and a millisecond `SleepDeferrer`.
 - Scope a limit to an "owner" (e.g. an IP or account) so independent callers don't share a
   budget.
-- Dispatches `RequestDeferred` / `RequestAllowed` events so you can log, meter, or alert on
-  throttling.
-- A `RetryAfter` helper to honour a server's `Retry-After` header alongside Laravel's own
+- Dispatches `RequestDeferred` / `RequestAllowed` / `RateLimitReset` events so you can log,
+  meter, or alert on throttling.
+- `RateLimits::retryAfter()` to honour a server's `Retry-After` header alongside Laravel's own
   `->retry()`.
 - Swap defaults per request, or globally via config — no required configuration to get started.
 
@@ -97,7 +98,7 @@ return [
         // 'github' => ['rate' => 5, 'per' => 'second', 'by' => null],
     ],
 
-    // Default Store used by RateLimit::make()/perSecond()/perMinute()/perHour().
+    // Default Store for every limit the manager builds (RateLimits::…, Http::rateLimit()).
     // Must implement RoundlyConsulting\HttpClientRateLimits\Store\Store.
     'store' => env('HTTP_CLIENT_RATE_LIMITS_STORE', InMemoryStore::class),
 
@@ -148,14 +149,14 @@ $response = Http::rateLimit(30)->get('https://api.example.com/orders');
 When the limit is reached, the middleware waits the exact time until the next request is
 allowed, then proceeds — you simply get your response a little later.
 
-Pass a `RateLimit` or a `Limit` to pick a different window, and `by:` to scope the budget to
-an owner:
+Pass a `RateLimit` (built by the `RateLimits` facade) or a `Limit` to pick a different window,
+and `by:` to scope the budget to an owner:
 
 ```php
-use RoundlyConsulting\HttpClientRateLimits\RateLimit;
+use RoundlyConsulting\HttpClientRateLimits\Facades\RateLimits;
 
-Http::rateLimit(RateLimit::perSecond(5))->get('https://api.example.com/things');
-Http::rateLimit(RateLimit::perDay(10_000))->get('https://api.example.com/report');
+Http::rateLimit(RateLimits::perSecond(5))->get('https://api.example.com/things');
+Http::rateLimit(RateLimits::perDay(10_000))->get('https://api.example.com/report');
 
 // Each owner gets its own budget (e.g. per account or outbound IP).
 Http::rateLimit(30, by: 'acct-1')->get('https://api.example.com/orders');
@@ -166,25 +167,51 @@ Http::rateLimit(30, by: 'acct-1')->get('https://api.example.com/orders');
 `RateLimit` is a Guzzle middleware, so you can also attach it with `Http::withMiddleware()`:
 
 ```php
-$response = Http::withMiddleware(RateLimit::perSecond(5))
+$response = Http::withMiddleware(RateLimits::perSecond(5))
     ->get('https://api.example.com/things');
 ```
 
-### Available factories
+### The `RateLimits` facade
+
+The facade is the one entry point for building limits. It resolves the container-bound
+`RateLimitManager`, so the configured store/deferrer — or a `RateLimits::fake()` — apply to
+every limit, including the ones `Http::rateLimit()` builds:
 
 ```php
-new RateLimit(Limiter $limiter);                 // build it yourself
-RateLimit::make(Limit $limit);                   // from a Limit value object
-RateLimit::perSecond(int $maxAttempts = 1);      // N requests per second
-RateLimit::perMinute(int $maxAttempts = 1);      // N requests per minute
-RateLimit::perHour(int $maxAttempts = 1);        // N requests per hour
-RateLimit::perDay(int $maxAttempts = 1);         // N requests per day
+use RoundlyConsulting\HttpClientRateLimits\Facades\RateLimits;
+
+RateLimits::make(Limit $limit);                  // from a Limit value object
+RateLimits::perSecond(int $maxAttempts = 1);     // N requests per second
+RateLimits::perMinute(int $maxAttempts = 1);     // N requests per minute
+RateLimits::perHour(int $maxAttempts = 1);       // N requests per hour
+RateLimits::perDay(int $maxAttempts = 1);        // N requests per day
+RateLimits::profile(string $name);               // a named profile from config
+RateLimits::compound(array $limits);             // several windows at once
+RateLimits::usingStore(Store $store);            // a copy of the manager on this store
+RateLimits::usingDeferrer(Deferrer $deferrer);   // … or with this deferrer
+RateLimits::releasingJob(object $job);           // … releasing a queued job instead of sleeping
+RateLimits::retryAfter(Response|RequestException $response); // ?int seconds from Retry-After
+RateLimits::store();                             // the shared default store
+RateLimits::deferrer();                          // the default deferrer
 ```
 
 Each returned `RateLimit` is fluent: `->by(...)`, `->alongside(...)`, `->maxWait(...)`,
-`->jitter(...)`, `->adaptive()`, `->remaining()`, `->availableIn()`, `->tooManyAttempts()`.
+`->jitter(...)`, `->adaptive()`, `->remaining()`, `->availableIn()`, `->tooManyAttempts()`,
+`->reset()`.
 
-The `RateLimits` facade adds `profile(string $name)` and `compound(array $limits)`.
+**Without the facade**, inject the manager — the same API and the same singleton:
+
+```php
+use RoundlyConsulting\HttpClientRateLimits\RateLimitManager;
+
+public function __construct(private RateLimitManager $rateLimits) {}
+
+Http::withMiddleware($this->rateLimits->perSecond(5)->by('acct-1'))->get($url);
+```
+
+The package has no action classes: a limit is a middleware object the manager builds, not a
+use case. `new RateLimit(new Limiter($limit, $store, $deferrer))` builds one by hand when you
+need full control.
 
 ### Named limiter profiles
 
@@ -213,16 +240,16 @@ Pass an array of limits to enforce them all on one request; the limiter defers t
 strictest and records the call once in every window when it is allowed:
 
 ```php
-use RoundlyConsulting\HttpClientRateLimits\RateLimit;
+use RoundlyConsulting\HttpClientRateLimits\Facades\RateLimits;
 
-Http::rateLimit([RateLimit::perSecond(5), RateLimit::perMinute(100)])
+Http::rateLimit([RateLimits::perSecond(5), RateLimits::perMinute(100)])
     ->get('https://api.example.com/things');
 
 // Or fluently, alongside the primary window:
-$middleware = RateLimit::perSecond(5)->alongside(RateLimit::perMinute(100));
+$middleware = RateLimits::perSecond(5)->alongside(RateLimits::perMinute(100));
 
 // Or by stacking the macro:
-Http::rateLimit(RateLimit::perSecond(5))->rateLimit(RateLimit::perMinute(100));
+Http::rateLimit(RateLimits::perSecond(5))->rateLimit(RateLimits::perMinute(100));
 ```
 
 Each window keeps its own count in the store — under `{key}:{window}`, e.g. `global:second`
@@ -238,7 +265,7 @@ When you'd rather error than block for too long, cap the wait. A computed defer 
 ceiling throws `RateLimitExceededException` (extends `RateLimitException`) instead of sleeping:
 
 ```php
-Http::rateLimit(RateLimit::perHour(10)->maxWait(5_000)) // milliseconds
+Http::rateLimit(RateLimits::perHour(10)->maxWait(5_000)) // milliseconds
     ->get('https://api.example.com/report');
 ```
 
@@ -247,7 +274,7 @@ Http::rateLimit(RateLimit::perHour(10)->maxWait(5_000)) // milliseconds
 Add randomised jitter to defers so many workers don't all wake at the same instant:
 
 ```php
-Http::rateLimit(RateLimit::perMinute(30)->jitter(50)) // ± up to 50ms
+Http::rateLimit(RateLimits::perMinute(30)->jitter(50)) // ± up to 50ms
     ->get('https://api.example.com/orders');
 ```
 
@@ -261,7 +288,7 @@ Opt in with `->adaptive()` and the limiter reads `Retry-After` and `X-RateLimit-
 waits exactly as long as the server asked:
 
 ```php
-Http::rateLimit(RateLimit::perSecond(20)->adaptive())
+Http::rateLimit(RateLimits::perSecond(20)->adaptive())
     ->get('https://api.example.com/things');
 ```
 
@@ -284,19 +311,21 @@ $limit->availableIn();      // ms until the next request is allowed (0 = now)
 $limit->tooManyAttempts();  // bool — is the window exhausted right now?
 ```
 
-### The `RateLimits` facade
+### Reset a limit
 
-For building or inspecting a limit without the HTTP client, use the `RateLimits` facade (it
-resolves the container-bound manager, so the configured store/deferrer apply):
+Clear the hits a key has recorded — after a plan upgrade, or between two phases of a batch —
+so the next request goes straight through:
 
 ```php
-use RoundlyConsulting\HttpClientRateLimits\Facades\RateLimits;
+RateLimits::perMinute(60)->by('stripe')->reset();
 
-$limit = RateLimits::perHour(60)->by('203.0.113.10');
-
-$at    = $limit->getDeferrer()->timestamp();
-$delay = $limit->delayUntilNextRequestInMs($at); // 0 = send now, else wait this many ms
+// A compound limit clears every window it enforces.
+RateLimits::perSecond(5)->by('stripe')->alongside(RateLimits::perMinute(100)->by('stripe'))->reset();
 ```
+
+A reset clears the windows the limit enforces (`stripe:minute` above), not other windows on
+the same key, and it does not lift a penalty an adaptive limit recorded from the server's own
+`Retry-After` — the server asked for that wait. It fires `RateLimitReset`.
 
 ### Scope a limit to an owner
 
@@ -304,7 +333,7 @@ Useful when a single quota is shared across servers/accounts and you want each o
 separately (e.g. per outbound IP):
 
 ```php
-$middleware = RateLimit::perHour(60)->by('203.0.113.10');
+$middleware = RateLimits::perHour(60)->by('203.0.113.10');
 
 Http::withMiddleware($middleware)->get('https://api.example.com/orders');
 ```
@@ -315,7 +344,7 @@ Http::withMiddleware($middleware)->get('https://api.example.com/orders');
 have to wait before the next call is allowed:
 
 ```php
-$middleware = RateLimit::perHour(6);
+$middleware = RateLimits::perHour(6);
 
 $at    = $middleware->getDeferrer()->timestamp();
 $delay = $middleware->delayUntilNextRequestInMs($at); // 0 = send now, else wait this many ms
@@ -328,28 +357,28 @@ $middleware->isOverMaxAttempts(7); // true
 ```php
 use RoundlyConsulting\HttpClientRateLimits\Store\RedisStore;
 
-$middleware = RateLimit::perMinute(30);
+$middleware = RateLimits::perMinute(30);
 
 $middleware->setStore(new RedisStore('cache')); // share limits across processes via Redis
 $middleware->setDeferrer($myDeferrer);
 ```
 
-### Change the defaults globally
+### Change the defaults
 
-In a service provider (or via the config file above):
+Set `store` / `deferrer` in the config file: every limit the manager builds uses them. For one
+call site, `RateLimits::usingStore()` / `usingDeferrer()` return a configured **copy** of the
+manager, so the shared singleton is never mutated:
 
 ```php
-use RoundlyConsulting\HttpClientRateLimits\RateLimit;
 use RoundlyConsulting\HttpClientRateLimits\Store\RedisStore;
 
-RateLimit::use(
-    defaultStore: new RedisStore('cache'),
-    defaultDeferrer: new MyDeferrer(),
-);
+$limits = RateLimits::usingStore(new RedisStore('cache'))->usingDeferrer(new MyDeferrer);
+
+$limits->perMinute(30);
 ```
 
-Every `RateLimit` created afterwards uses those defaults. Call `RateLimit::use()` with no
-arguments to reset back to the config-driven defaults.
+A copy keeps sharing the manager's config-resolved store, so hits still accumulate in one
+budget per process.
 
 ### Stores
 
@@ -399,15 +428,13 @@ adaptive limiting via `penalizeUntil()` / `penalizedUntil()`. Write your own by 
   `Illuminate\Support\Sleep` (fakeable in tests).
 - **`ReleaseDeferrer`** — for use inside a queued job: instead of blocking the worker, it
   releases the job back onto the queue with the computed delay and throws
-  `JobReleasedException` to unwind the current attempt. Construct it with the job and opt in
-  via `RateLimits::usingDeferrer(...)`:
+  `JobReleasedException` to unwind the current attempt. Opt in with `RateLimits::releasingJob()`:
 
   ```php
-  use RoundlyConsulting\HttpClientRateLimits\Deferrer\ReleaseDeferrer;
   use RoundlyConsulting\HttpClientRateLimits\Facades\RateLimits;
 
   // inside a queued job's handle(), $this uses Illuminate\Queue\InteractsWithQueue
-  $rateLimit = RateLimits::usingDeferrer(new ReleaseDeferrer($this))->perSecond(5);
+  $rateLimit = RateLimits::releasingJob($this)->perSecond(5);
 
   Http::withMiddleware($rateLimit)->get('https://api.example.com/things');
   ```
@@ -426,6 +453,7 @@ When `events_enabled` is on (the default), the limiter dispatches:
   penalty alone caused the wait.
 - **`RequestAllowed`** — `string $key`, `int $hitsInWindow`, `Timespan $timespan` — after a
   request is recorded and allowed through.
+- **`RateLimitReset`** — `string $key` — after `->reset()` cleared a limit's recorded hits.
 
 Listen for them to log, chart, or alert on throttling:
 
@@ -447,19 +475,17 @@ Set `events_enabled` to `false` for the lowest possible overhead.
 ### Reacting to 429 / Retry-After
 
 This package *paces* outgoing requests proactively. To also react to a server's own signals,
-use `->adaptive()` (above) or combine the middleware with Laravel's own `->retry()` and the
-`RetryAfter` helper to honour a `429 Too Many Requests` / `Retry-After` response:
+use `->adaptive()` (above) or combine the middleware with Laravel's own `->retry()` and
+`RateLimits::retryAfter()` to honour a `429 Too Many Requests` / `Retry-After` response:
 
 ```php
-use RoundlyConsulting\HttpClientRateLimits\RetryAfter;
-
-Http::rateLimit(RateLimit::perMinute(60))
+Http::rateLimit(RateLimits::perMinute(60))
     ->retry(3, throw: false, sleepMilliseconds: fn ($attempt, $exception) =>
-        (RetryAfter::seconds($exception) ?? $attempt) * 1000)
+        (RateLimits::retryAfter($exception) ?? $attempt) * 1000)
     ->get('https://api.example.com/things');
 ```
 
-`RetryAfter::seconds()` accepts a `Response` or a `RequestException`, parses both the
+`RateLimits::retryAfter()` accepts a `Response` or a `RequestException`, parses both the
 delta-seconds and HTTP-date forms of the header, and returns `null` when it's absent or
 unparseable.
 
@@ -479,11 +505,16 @@ Http::rateLimit(1, by: 'acct-1')->get('https://api.example.com/two');
 $fake->assertDeferred('acct-1');   // a request for this key was throttled
 $fake->assertAllowed();            // at least one request went through
 // $fake->assertNothingDeferred(); // would fail here
+
+RateLimits::perMinute(60)->by('stripe')->reset();
+$fake->assertReset('stripe');
 ```
 
-`fake()` returns a `RateLimitsFake` exposing `assertDeferred(?string $key)`,
-`assertAllowed(?string $key)`, `assertNothingDeferred()`, and the shared `store()` /
-`deferrer()` for finer-grained assertions. The store records hits per window, so read them
+`fake()` returns a `RateLimitsFake` — a `RateLimitManager` subtype, so an injected manager and
+`Http::rateLimit()` get it too — exposing `assertDeferred(?string $key)` /
+`assertNothingDeferred()`, `assertAllowed(?string $key)` / `assertNothingAllowed()`,
+`assertReset(?string $key)` / `assertNothingReset()`, `deferredCount()` / `allowedCount()`, and
+the shared `store()` / `deferrer()` for finer-grained assertions. The store records hits per window, so read them
 back with the limit's store key: `$fake->store()->hits('acct-1:minute')`.
 
 ## Integrates with

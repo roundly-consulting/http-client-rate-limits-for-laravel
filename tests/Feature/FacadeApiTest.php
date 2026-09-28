@@ -82,14 +82,18 @@ it('resets a key so the next request goes straight through', function () {
     $limit = RateLimits::perMinute(2)->by('stripe')->alongside(RateLimits::perSecond(1)->by('stripe'));
     $limit->handle(fn () => null);
     $limit->handle(fn () => null);
-    $store->penalizeUntil('stripe', 5_000_000);
 
     expect($limit->remaining())->toBe(0)
         ->and(RateLimits::perMinute(2)->by('stripe')->reset())->toBeInstanceOf(RateLimit::class)
         ->and($store->hits('stripe:minute'))->toBe([])
         ->and($store->hits('stripe:second'))->not->toBe([])
         ->and($limit->reset()->remaining())->toBe(2)
-        ->and($store->hits('stripe:second'))->toBe([])
+        ->and($store->hits('stripe:second'))->toBe([]);
+
+    // A server penalty is not lifted by a reset: the window stays closed until it passes.
+    $store->penalizeUntil('stripe', 5_000_000);
+
+    expect($limit->reset()->remaining())->toBe(0)
         ->and($store->penalizedUntil('stripe'))->toBe(5_000_000);
 
     Event::assertDispatched(RateLimitReset::class, fn (RateLimitReset $event): bool => $event->key === 'stripe');

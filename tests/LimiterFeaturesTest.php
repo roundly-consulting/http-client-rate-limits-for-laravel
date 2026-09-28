@@ -579,3 +579,20 @@ it('takes a deferrer that did not move its clock at its word', function () {
     expect($frozen->defers)->toBe([1_000])
         ->and($store->hits('frozen:second'))->toBe([5_000, 6_000]);
 });
+
+it('caps a huge X-RateLimit-Reset instead of overflowing', function () {
+    $store = new InMemoryStore;
+
+    $limiter = new Limiter(
+        limit: (new Limit(key: 'api', maxAttempts: 100, timespan: 'second'))->adaptive(),
+        store: $store,
+        deferrer: new TestDeferrer(1_000_000),
+    );
+
+    $limiter->handle(fn () => new Response(new PsrResponse(200, [
+        'X-RateLimit-Remaining' => '0',
+        'X-RateLimit-Reset' => '99999999999999999999',
+    ])));
+
+    expect($store->penalizedUntil('api'))->toBe(1_000_000 + 86_400_000);
+});

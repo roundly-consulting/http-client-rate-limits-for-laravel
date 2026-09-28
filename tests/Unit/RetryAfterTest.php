@@ -50,3 +50,17 @@ it('reads the header from a request exception', function () {
 
     expect(RetryAfter::seconds($exception))->toBe(12);
 });
+
+it('caps an absurd delta at one day', function () {
+    $response = new Response(new PsrResponse(429, ['Retry-After' => '99999999999999999999']));
+
+    expect(RetryAfter::seconds($response))->toBe(RetryAfter::MAX_SECONDS)->toBe(86_400)
+        ->and(RetryAfter::seconds(new Response(new PsrResponse(429, ['Retry-After' => '86401']))))->toBe(86_400)
+        ->and(RetryAfter::seconds(new Response(new PsrResponse(429, ['Retry-After' => '86400']))))->toBe(86_400);
+});
+
+it('caps a far-future http-date at one day', function () {
+    $response = new Response(new PsrResponse(429, ['Retry-After' => 'Fri, 31 Dec 9999 23:59:59 GMT']));
+
+    expect(RetryAfter::seconds($response))->toBe(86_400);
+});

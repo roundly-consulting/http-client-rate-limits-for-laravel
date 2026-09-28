@@ -98,3 +98,32 @@ it('leaves the store untouched through the macro when the limit is not adaptive'
 
     expect($store->penalizedUntil('api'))->toBeNull();
 });
+
+// Bug: a Retry-After past PHP_INT_MAX / 1000 overflowed to a float and penalizeUntil(int) threw.
+it('caps a huge Retry-After at one day instead of crashing the request', function () {
+    $store = new InMemoryStore;
+    rateLimitsUsing($store, new TestDeferrer(1_000_000));
+
+    Http::fake(['*' => Http::response('slow down', 429, ['Retry-After' => '99999999999999999999'])]);
+
+    $response = Http::rateLimit(RateLimits::perSecond(5)->by('ra')->adaptive())->get('https://api.example.com/one');
+
+    expect($response->status())->toBe(429)
+        ->and($store->penalizedUntil('ra'))->toBe(1_000_000 + 86_400_000)
+        ->and(RateLimits::retryAfter($response))->toBe(86_400);
+});
+
+// Bug: remaining() counted only the window's hits, so it said 19 while the penalty held every request.
+it('reports nothing remaining while a server penalty is in force', function () {
+    $store = new InMemoryStore;
+    rateLimitsUsing($store, new TestDeferrer(1_000_000));
+
+    Http::fake(['*' => Http::response('slow down', 429, ['Retry-After' => '7'])]);
+
+    $limit = RateLimits::perSecond(20)->by('pen')->adaptive();
+    Http::rateLimit($limit)->get('https://api.example.com/one');
+
+    expect($limit->availableIn())->toBe(7_000)
+        ->and($limit->tooManyAttempts())->toBeTrue()
+        ->and($limit->remaining())->toBe(0);
+});

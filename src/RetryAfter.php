@@ -18,8 +18,14 @@ use Illuminate\Support\Carbon;
 final class RetryAfter
 {
     /**
-     * Number of seconds to wait per the `Retry-After` header, or null when the
-     * header is absent or unparseable.
+     * The longest wait honoured (one day, the largest window), so a hostile or broken
+     * header can neither overflow the millisecond arithmetic nor stall a worker for years.
+     */
+    public const MAX_SECONDS = 86_400;
+
+    /**
+     * Number of seconds to wait per the `Retry-After` header (capped at MAX_SECONDS), or
+     * null when the header is absent or unparseable.
      */
     public static function seconds(Response|RequestException $source): ?int
     {
@@ -32,15 +38,24 @@ final class RetryAfter
         }
 
         if (ctype_digit($header)) {
-            return (int) $header;
+            // The cast saturates at PHP_INT_MAX; the cap then brings it into range.
+            return self::cap((int) $header);
         }
 
         try {
-            $seconds = (int) ceil(Carbon::now()->diffInSeconds(Carbon::parse($header), false));
+            $seconds = Carbon::now()->diffInSeconds(Carbon::parse($header), false);
         } catch (InvalidFormatException) {
             return null;
         }
 
-        return max($seconds, 0);
+        return self::cap((int) ceil(min($seconds, self::MAX_SECONDS)));
+    }
+
+    /**
+     * Clamp a wait to [0, MAX_SECONDS].
+     */
+    public static function cap(int $seconds): int
+    {
+        return min(max($seconds, 0), self::MAX_SECONDS);
     }
 }

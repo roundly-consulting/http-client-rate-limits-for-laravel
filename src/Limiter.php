@@ -235,7 +235,8 @@ final class Limiter
     }
 
     /**
-     * Requests still allowed in the primary window right now (never negative).
+     * Requests still allowed in the primary window right now (never negative; 0 while an
+     * adaptive server penalty is in force, since nothing may go until it passes).
      */
     public function remaining(): int
     {
@@ -245,6 +246,10 @@ final class Limiter
     public function remainingForLimit(Limit $limit): int
     {
         $now = $this->deferrer->timestamp();
+
+        if (Windows::penaltyDelay($this->store->penalizedUntil($limit->getKey()), $now) > 0) {
+            return 0;
+        }
 
         $used = count($this->store->hitsSince(
             owner: $limit->storeKey(),
@@ -375,7 +380,7 @@ final class Limiter
             return;
         }
 
-        $until = $now + $seconds * 1000;
+        $until = $now + RetryAfter::cap($seconds) * 1000;
 
         foreach ($this->getLimits() as $limit) {
             if ($limit->isAdaptive()) {
@@ -416,7 +421,8 @@ final class Limiter
         $nowSeconds = intdiv($now, 1000);
 
         if ($resetValue > $nowSeconds) {
-            return $resetValue - $nowSeconds;
+            // The cast saturates at PHP_INT_MAX for an absurd header; cap it in range.
+            return RetryAfter::cap($resetValue - $nowSeconds);
         }
 
         return $resetValue >= self::EPOCH_THRESHOLD_SECONDS ? 0 : $resetValue;

@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\Http;
 use PHPUnit\Framework\AssertionFailedError;
+use RoundlyConsulting\HttpClientRateLimits\Exceptions\JobReleasedException;
 use RoundlyConsulting\HttpClientRateLimits\Facades\RateLimits;
 use RoundlyConsulting\HttpClientRateLimits\RateLimitManager;
 use RoundlyConsulting\HttpClientRateLimits\Store\InMemoryStore;
 use RoundlyConsulting\HttpClientRateLimits\Testing\RateLimitsFake;
+use RoundlyConsulting\HttpClientRateLimits\Tests\TestDeferrer;
 
 beforeEach(function () {
     Http::fake(['*' => Http::response('ok')]);
@@ -86,3 +88,63 @@ it('fails assertAllowed when nothing was allowed', function () {
 
     $fake->assertAllowed();
 })->throws(AssertionFailedError::class);
+
+// Bug: the fake's make() ignored every per-call override, so these never took effect under fake().
+it('honours usingStore() under the fake', function () {
+    $fake = RateLimits::fake();
+    $store = new InMemoryStore;
+
+    $limit = RateLimits::usingStore($store)->perSecond(5)->by('own-store');
+    Http::rateLimit($limit)->get('https://api.example.com/one');
+
+    expect($limit->getStore())->toBe($store)
+        ->and($limit->getDeferrer())->toBe($fake->deferrer())
+        ->and($store->hits('own-store:second'))->toHaveCount(1)
+        ->and($fake->store()->hits('own-store:second'))->toBe([]);
+
+    $fake->assertAllowed('own-store');
+});
+
+it('honours usingDeferrer() under the fake', function () {
+    $fake = RateLimits::fake();
+    $deferrer = new TestDeferrer(1_000_000);
+
+    $limit = RateLimits::usingDeferrer($deferrer)->perMinute(1)->by('own-deferrer');
+    Http::rateLimit($limit)->get('https://api.example.com/one');
+    Http::rateLimit($limit)->get('https://api.example.com/two');
+
+    expect($limit->getDeferrer())->toBe($deferrer)
+        ->and($limit->getStore())->toBe($fake->store())
+        ->and($deferrer->timestamp())->toBe(1_060_000)
+        ->and($fake->deferrer()->deferCount())->toBe(0);
+
+    $fake->assertDeferred('own-deferrer');
+});
+
+it('really releases the job for releasingJob() under the fake', function () {
+    $fake = RateLimits::fake();
+    $job = new class
+    {
+        /** @var list<int> */
+        public array $released = [];
+
+        public function release(int $delay): void
+        {
+            $this->released[] = $delay;
+        }
+    };
+
+    Http::rateLimit(RateLimits::perHour(1)->by('fake-job'))->get('https://api.example.com/one');
+
+    try {
+        Http::rateLimit(RateLimits::releasingJob($job)->perHour(1)->by('fake-job'))->get('https://api.example.com/two');
+        $this->fail('Expected the job to be released.');
+    } catch (JobReleasedException $exception) {
+        expect($exception->key)->toBe('fake-job');
+    }
+
+    expect($job->released)->toHaveCount(1)
+        ->and($job->released[0])->toBeGreaterThan(3_500)->toBeLessThanOrEqual(3_600);
+
+    $fake->assertDeferred('fake-job');
+});

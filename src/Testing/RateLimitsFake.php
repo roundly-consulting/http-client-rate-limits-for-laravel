@@ -6,6 +6,7 @@ namespace RoundlyConsulting\HttpClientRateLimits\Testing;
 
 use Illuminate\Contracts\Config\Repository;
 use PHPUnit\Framework\Assert as PHPUnit;
+use RoundlyConsulting\HttpClientRateLimits\Deferrer\Deferrer;
 use RoundlyConsulting\HttpClientRateLimits\Deferrer\RecordingDeferrer;
 use RoundlyConsulting\HttpClientRateLimits\Events\RateLimitReset;
 use RoundlyConsulting\HttpClientRateLimits\Events\RequestAllowed;
@@ -15,15 +16,22 @@ use RoundlyConsulting\HttpClientRateLimits\Limiter;
 use RoundlyConsulting\HttpClientRateLimits\RateLimit;
 use RoundlyConsulting\HttpClientRateLimits\RateLimitManager;
 use RoundlyConsulting\HttpClientRateLimits\Store\InMemoryStore;
+use RoundlyConsulting\HttpClientRateLimits\Store\Store;
 
 /**
  * Drop-in RateLimitManager for tests: never sleeps (records defers instead) and
  * shares a single in-memory store so assertions can verify throttling behaviour
  * without Redis or real waits. Records allowed, deferred and reset limits — through
  * the facade, an injected manager and `Http::rateLimit()` alike.
+ *
+ * `usingStore()`, `usingDeferrer()` and `releasingJob()` are honoured: they return a
+ * manager on the override, keeping the fake's recording store/deferrer for the other half —
+ * so a released job really is released, and its events are still recorded here.
  */
 final class RateLimitsFake extends RateLimitManager
 {
+    private readonly Repository $config;
+
     private readonly InMemoryStore $sharedStore;
 
     private readonly RecordingDeferrer $sharedDeferrer;
@@ -41,8 +49,23 @@ final class RateLimitsFake extends RateLimitManager
     {
         parent::__construct($config);
 
+        $this->config = $config;
         $this->sharedStore = new InMemoryStore;
         $this->sharedDeferrer = new RecordingDeferrer;
+    }
+
+    public function usingStore(Store $store): RateLimitManager
+    {
+        return (new RateLimitManager($this->config))
+            ->usingStore($store)
+            ->usingDeferrer($this->sharedDeferrer);
+    }
+
+    public function usingDeferrer(Deferrer $deferrer): RateLimitManager
+    {
+        return (new RateLimitManager($this->config))
+            ->usingStore($this->sharedStore)
+            ->usingDeferrer($deferrer);
     }
 
     public function make(Limit $limit): RateLimit

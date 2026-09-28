@@ -23,9 +23,12 @@ Initial public release.
   `RateLimits::retryAfter()` for Laravel's `->retry()`.
 - Pre-flight inspection with `remaining()`, `availableIn()` and `tooManyAttempts()`, and
   `->reset()` to clear a key's recorded hits.
-- Pluggable stores — in-memory, cache, Redis and database — and deferrers, including
-  `RateLimits::releasingJob($job)`, which releases a queued job back onto the queue instead of
-  blocking the worker.
+- Pluggable stores — in-memory, cache, Redis and database — each checking a request against
+  every window and recording it as one atomic step (`Store::attempt()`: a lock, a Lua script or a
+  locking transaction), and deferrers, including `RateLimits::releasingJob($job)`, which releases
+  a queued job back onto the queue instead of blocking the worker, with the
+  `HandlesRateLimitRelease` job middleware to end that attempt cleanly.
+- `database_connection` config key to give the `DatabaseStore` its own connection.
 - `RequestDeferred`, `RequestAllowed` and `RateLimitReset` events for logging, metrics and alerts.
 - `RateLimits::fake()` with `assertDeferred()`, `assertAllowed()`, `assertReset()` and their
   `assertNothing…()` twins for testing throttling without real sleeps. The fake is a
@@ -39,9 +42,33 @@ Initial public release.
   `RateLimits::fake()`. Configure defaults in `config/http-client-rate-limits.php` or per call
   site with `RateLimits::usingStore()` / `usingDeferrer()`.
 - `RetryAfter` is internal; use `RateLimits::retryAfter()`.
+- The `Store` contract gains `attempt()`, and `Deferrer::defer()` takes the limit key. The
+  `DatabaseStore` migration creates a second table, `http_client_rate_limit_owners`, which holds
+  penalties (the hits table loses `penalized_until`). `RedisStore` keys are hash-tagged by limit
+  key.
 
 ### Fixed
 
 - A `usingStore()` / `usingDeferrer()` copy of the manager no longer resolves its own
   config store: every copy shares the process store, so an in-memory limit built through a copy
   accumulates hits with the rest.
+- Workers sharing a store could both take one freed slot: checking and recording were separate
+  steps and the limiter never re-checked after waiting. Both are fixed — the store attempt is
+  atomic and a wait is always followed by a fresh attempt.
+- `RedisStore` counted hits recorded in the same millisecond once (the timestamp was also the
+  sorted-set member); each hit now has a unique member.
+- Jitter could shorten a wait below the time the window frees; it now only adds.
+- `by()` / `by:` on a compound limit re-keyed only the primary window, and the macro re-keyed
+  the caller's own `RateLimit`; every window is re-keyed now, on a copy.
+- The wait for an over-full window was measured from its oldest hit, so the request still went
+  out over the limit; it now waits for hit `[count - max]`.
+- A `ReleaseDeferrer` release surfaced in the worker as a job exception (reported, counted
+  toward `$maxExceptions`, failing the job while its released copy was still queued).
+- A huge `Retry-After` / `X-RateLimit-Reset` crashed adaptive mode with a `TypeError`; server
+  waits are capped at one day.
+- `RateLimits::fake()` ignored `usingStore()`, `usingDeferrer()` and `releasingJob()`.
+- `remaining()` ignored an adaptive penalty; it reports 0 while one is in force.
+- A limit of 0 (or fewer) attempts let the first request through; it now throws
+  `InvalidLimitException`.
+- `JobReleasedException` always named the key `global`; it names the releasing limit's key.
+- `events_enabled` read `off` / `no` from the environment as enabled.

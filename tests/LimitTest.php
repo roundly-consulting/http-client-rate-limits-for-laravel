@@ -3,8 +3,13 @@
 declare(strict_types=1);
 
 use RoundlyConsulting\HttpClientRateLimits\Enums\Timespan;
+use RoundlyConsulting\HttpClientRateLimits\Exceptions\InvalidLimitException;
 use RoundlyConsulting\HttpClientRateLimits\Exceptions\InvalidTimespanException;
+use RoundlyConsulting\HttpClientRateLimits\Facades\RateLimits;
 use RoundlyConsulting\HttpClientRateLimits\Limit;
+use RoundlyConsulting\HttpClientRateLimits\Limiter;
+use RoundlyConsulting\HttpClientRateLimits\Store\InMemoryStore;
+use RoundlyConsulting\HttpClientRateLimits\Tests\TestDeferrer;
 
 it('sets max attempts per second', function () {
     $limit = new Limit;
@@ -149,4 +154,31 @@ it('checks whether attempt is under or above max attempts', function () {
         ->toBeTrue()
         ->and($limit->isOverMaxAttempts(4))
         ->toBeFalse();
+});
+
+// Bug: a budget of 0 (or less) still let the first request through — it behaved like 1.
+it('rejects a budget below one attempt per window', function (Closure $build) {
+    expect($build)->toThrow(InvalidLimitException::class, 'at least 1 attempt per window');
+})->with([
+    'constructor' => fn () => new Limit(maxAttempts: 0),
+    'negative' => fn () => new Limit(maxAttempts: -3),
+    'setter' => fn () => (new Limit)->maxAttempts(0, 'minute'),
+    'perMinute' => fn () => (new Limit)->perMinute(0),
+    'facade' => fn () => RateLimits::perMinute(0),
+    'profile' => function (): void {
+        config()->set('http-client-rate-limits.limiters.none', ['rate' => 0, 'per' => 'minute']);
+        RateLimits::profile('none');
+    },
+]);
+
+it('never lets a request through a zero budget', function () {
+    $store = new InMemoryStore;
+
+    try {
+        (new Limiter(new Limit('z', 0, 'minute'), $store, new TestDeferrer))->handle(fn () => null);
+    } catch (InvalidLimitException) {
+        // expected
+    }
+
+    expect($store->hits('z:minute'))->toBe([]);
 });

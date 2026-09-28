@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace RoundlyConsulting\HttpClientRateLimits;
 
 use RoundlyConsulting\HttpClientRateLimits\Enums\Timespan;
+use RoundlyConsulting\HttpClientRateLimits\Exceptions\InvalidLimitException;
 
 final class Limit
 {
@@ -25,6 +26,7 @@ final class Limit
         Timespan|string $timespan = Timespan::Second,
         protected bool $trim = false,
     ) {
+        $this->maxAttempts = $this->validMaxAttempts($maxAttempts);
         $this->timespan = $this->normalizeTimespan($timespan);
     }
 
@@ -50,7 +52,7 @@ final class Limit
 
     public function maxAttempts(int $maxAttempts, Timespan|string $timespan = Timespan::Second): self
     {
-        $this->maxAttempts = $maxAttempts;
+        $this->maxAttempts = $this->validMaxAttempts($maxAttempts);
         $this->timespan = $this->normalizeTimespan($timespan);
 
         return $this;
@@ -166,6 +168,19 @@ final class Limit
     public function timespanLengthInMs(): int
     {
         return $this->timespan->lengthInMs();
+    }
+
+    /**
+     * A budget below one could never let a request through: reject it instead of passing
+     * the first request (the old behaviour) or waiting forever.
+     */
+    protected function validMaxAttempts(int $maxAttempts): int
+    {
+        if ($maxAttempts < 1) {
+            throw InvalidLimitException::maxAttempts($maxAttempts);
+        }
+
+        return $maxAttempts;
     }
 
     protected function normalizeTimespan(Timespan|string $timespan): Timespan

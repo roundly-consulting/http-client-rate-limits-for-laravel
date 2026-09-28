@@ -42,6 +42,11 @@ jobs:
           extensions: dom, curl, libxml, mbstring, zip, pcntl, bcmath, intl, fileinfo, redis
           coverage: xdebug
 
+      - name: Install Lua 5.1
+        # The RedisStore Lua script is also run through tests/Support/LuaRedisConnection, in the
+        # Lua dialect Redis embeds — beside the real-Redis cases the redis service runs.
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq lua5.1
+
       - name: Install dependencies
         env:
           COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ secrets.COMPOSER_AUTH_TOKEN }}"}}'
@@ -99,6 +104,9 @@ jobs:
           php-version: 8.4
           extensions: dom, curl, libxml, mbstring, zip, pcntl, bcmath, intl, fileinfo, redis, pdo, sqlite, pdo_sqlite, pgsql, pdo_pgsql
           coverage: none
+
+      - name: Install Lua 5.1
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq lua5.1
 
       - name: Install dependencies
         env:

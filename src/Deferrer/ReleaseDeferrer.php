@@ -6,13 +6,19 @@ namespace RoundlyConsulting\HttpClientRateLimits\Deferrer;
 
 use RoundlyConsulting\HttpClientRateLimits\Exceptions\InvalidDeferrerException;
 use RoundlyConsulting\HttpClientRateLimits\Exceptions\JobReleasedException;
+use RoundlyConsulting\HttpClientRateLimits\Jobs\Middleware\HandlesRateLimitRelease;
 
 /**
  * Inside a queued job, releasing the job back onto the queue is far cheaper than
  * blocking the worker with sleep(). Given the job (any object exposing Laravel's
  * release(int $seconds) method — e.g. one using Illuminate\Queue\InteractsWithQueue),
  * this deferrer re-queues it with the computed delay and throws a JobReleasedException
- * to unwind the current attempt.
+ * to unwind the current attempt without sending the request.
+ *
+ * Give the job the HandlesRateLimitRelease middleware (or catch the exception): it ends
+ * the attempt cleanly, so the worker never sees the unwind as a job exception.
+ *
+ * @see HandlesRateLimitRelease
  */
 final class ReleaseDeferrer implements Deferrer
 {
@@ -38,6 +44,6 @@ final class ReleaseDeferrer implements Deferrer
 
         $this->job->release($seconds);
 
-        throw new JobReleasedException($seconds);
+        throw new JobReleasedException($seconds, $key, $this->job);
     }
 }

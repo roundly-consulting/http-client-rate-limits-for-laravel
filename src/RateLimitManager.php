@@ -76,7 +76,8 @@ class RateLimitManager
     /**
      * The same manager, deferring by releasing a queued job back onto the queue instead of
      * sleeping the worker. `$job` exposes Laravel's `release(int $seconds)` (e.g. it uses
-     * `InteractsWithQueue`); the attempt unwinds with a `JobReleasedException`.
+     * `InteractsWithQueue`); the attempt unwinds with a `JobReleasedException`, which the
+     * job's `HandlesRateLimitRelease` middleware turns into a clean end of the attempt.
      */
     public function releasingJob(object $job): self
     {

@@ -48,8 +48,6 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq lua5.1
 
       - name: Install dependencies
-        env:
-          COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ secrets.COMPOSER_AUTH_TOKEN }}"}}'
         run: |
           composer require --dev "laravel/framework:${{ matrix.laravel }}" "orchestra/testbench:${{ matrix.testbench }}" --no-interaction --no-update
           composer update --${{ matrix.stability }} --prefer-dist --no-interaction
@@ -109,8 +107,6 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq lua5.1
 
       - name: Install dependencies
-        env:
-          COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ secrets.COMPOSER_AUTH_TOKEN }}"}}'
         run: composer update --prefer-stable --prefer-dist --no-interaction
 
       - name: Execute tests against postgres

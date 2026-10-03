@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use RoundlyConsulting\HttpClientRateLimits\DataTransferObjects\LimiterProfileData;
 use RoundlyConsulting\HttpClientRateLimits\Enums\Timespan;
+use RoundlyConsulting\HttpClientRateLimits\Facades\RateLimits;
+use RoundlyConsulting\PackageToolkit\Exceptions\InvalidConfigurationException;
 
 it('builds from a minimal config with defaults', function () {
     $data = LimiterProfileData::fromConfig([]);
@@ -71,3 +73,27 @@ it('defaults the limit key to global without a by', function () {
         ->and($limit->getJitter())->toBe(0)
         ->and($limit->isAdaptive())->toBeFalse();
 });
+
+it('reads env-style trim and adaptive switches as booleans', function (string $value, bool $expected) {
+    // `(bool) 'off'` is true: an env `off`/`no` used to switch both ON.
+    $data = LimiterProfileData::fromConfig(['trim' => $value, 'adaptive' => $value]);
+
+    expect($data->trim)->toBe($expected)
+        ->and($data->adaptive)->toBe($expected);
+})->with([
+    'off' => ['off', false],
+    'no' => ['no', false],
+    '0' => ['0', false],
+    'on' => ['on', true],
+    'yes' => ['yes', true],
+    '1' => ['1', true],
+]);
+
+it('refuses an unreadable profile switch, naming the profile key (strict config)', function (string $leaf) {
+    config()->set('http-client-rate-limits.limiters.github', ['rate' => 5, $leaf => 'disabled']);
+
+    expect(fn () => RateLimits::profile('github'))->toThrow(
+        InvalidConfigurationException::class,
+        "Configuration value [http-client-rate-limits.limiters.github.{$leaf}] must be a boolean",
+    );
+})->with(['trim', 'adaptive']);

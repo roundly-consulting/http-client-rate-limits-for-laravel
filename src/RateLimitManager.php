@@ -135,7 +135,7 @@ class RateLimitManager
         /** @var array<string, mixed> $profileConfig */
         $profileConfig = $limiters[$name];
 
-        return $this->make(LimiterProfileData::fromConfig($profileConfig)->toLimit());
+        return $this->make(LimiterProfileData::fromConfig($profileConfig, "http-client-rate-limits.limiters.{$name}")->toLimit());
     }
 
     /**

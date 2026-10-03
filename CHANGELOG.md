@@ -72,3 +72,5 @@ Initial public release.
   `InvalidLimitException`.
 - `JobReleasedException` always named the key `global`; it names the releasing limit's key.
 - `events_enabled` read `off` / `no` from the environment as enabled.
+- A limiter profile's `trim` / `adaptive` was cast with `(bool)`, so `off`/`no` switched it on.
+  Both are read strictly now and throw on anything but a boolean spelling, naming the profile key.

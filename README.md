@@ -137,7 +137,7 @@ return [
 | `cache_prefix` | `string` | `'http-client-rate-limits'` | `HTTP_CLIENT_RATE_LIMITS_CACHE_PREFIX` | Key prefix used by `CacheStore`. |
 | `redis_connection` | `string` | `'default'` | `HTTP_CLIENT_RATE_LIMITS_REDIS_CONNECTION` | Redis connection the `RedisStore` uses. |
 | `database_connection` | `?string` | `null` | `HTTP_CLIENT_RATE_LIMITS_DATABASE_CONNECTION` | Database connection the `DatabaseStore` uses (`null` = default). |
-| `events_enabled` | `bool` | `true` | `HTTP_CLIENT_RATE_LIMITS_EVENTS_ENABLED` | Dispatch throttling events. Accepts `true`/`false`, `1`/`0`, `on`/`off`, `yes`/`no`. |
+| `events_enabled` | `bool` | `true` | `HTTP_CLIENT_RATE_LIMITS_EVENTS_ENABLED` | Dispatch throttling events. Accepts `true`/`false`, `1`/`0`, `on`/`off`, `yes`/`no`; anything else throws `InvalidConfigurationException`. |
 
 A configured `store`/`deferrer` that does not implement the matching contract throws a typed
 `InvalidStoreException` / `InvalidDeferrerException` (both extend `RateLimitException`) when a
@@ -247,7 +247,9 @@ Http::rateLimit('github')->get('https://api.github.com/user');
 
 Referencing a name that isn't defined throws `UnknownLimiterProfileException`. Each profile
 array accepts `rate`, `per`, and the optional `by`, `trim`, `max_wait`, `jitter`, and
-`adaptive` keys.
+`adaptive` keys. `trim` and `adaptive` take `true`/`false`, `1`/`0`, `on`/`off` or `yes`/`no`;
+anything else throws `InvalidConfigurationException` naming the key, e.g.
+`http-client-rate-limits.limiters.github.adaptive`.
 
 ### Compound limits (several windows at once)
 

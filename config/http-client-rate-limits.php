@@ -17,7 +17,9 @@ return [
     | is an array with: "rate" (int), "per" (second|minute|hour|day), and the
     | optional "by", "trim" (bool), "max_wait" (ms), "jitter" (ms), and
     | "adaptive" (bool) keys. Referencing an undefined name throws
-    | UnknownLimiterProfileException.
+    | UnknownLimiterProfileException. Values are read strictly: a number that
+    | isn't an integer ("five", "5.5"), a negative max_wait/jitter, a "per"
+    | typo or a blank "by" throws, naming the profile key.
     |
     */
 
@@ -49,7 +51,8 @@ return [
     |
     | Used only when the store above is the CacheStore. "cache_store" is the
     | cache store name from config/cache.php (null = the default store) and
-    | "cache_prefix" namespaces the cache keys the package writes.
+    | "cache_prefix" namespaces the cache keys the package writes. A blank or
+    | non-string value throws instead of falling back to the default.
     |
     */
 
@@ -78,6 +81,7 @@ return [
     |
     | The Redis connection name (from config/database.php) the RedisStore uses
     | when it is selected as the default store. Ignored for any other store.
+    | A blank or non-string value throws.
     |
     */
 
@@ -92,7 +96,8 @@ return [
     | uses when it is selected as the default store; null = the default
     | connection. A dedicated connection keeps the store's short locking
     | transactions out of any transaction your code has open. Ignored for any
-    | other store.
+    | other store. A blank value throws: leave the env unset (or "null") for
+    | the default connection.
     |
     */
 

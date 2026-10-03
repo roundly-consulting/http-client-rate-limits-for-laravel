@@ -16,6 +16,7 @@ use RoundlyConsulting\HttpClientRateLimits\Store\InMemoryStore;
 use RoundlyConsulting\HttpClientRateLimits\Store\RedisStore;
 use RoundlyConsulting\HttpClientRateLimits\Tests\TestDeferrer;
 use RoundlyConsulting\HttpClientRateLimits\Tests\TestStore;
+use RoundlyConsulting\PackageToolkit\Exceptions\InvalidConfigurationException;
 
 it('is resolved as a singleton from the container', function () {
     expect(app(RateLimitManager::class))->toBe(app(RateLimitManager::class));
@@ -125,4 +126,31 @@ it('builds a compound rate limit defaulting to a global limit when empty', funct
     $rateLimit = app(RateLimitManager::class)->compound([]);
 
     expect($rateLimit->getLimiter()->getLimits())->toHaveCount(1);
+});
+
+it('refuses a non-string or blank store setting instead of using the default (strict config)', function (string $store, string $key, mixed $value) {
+    config()->set('http-client-rate-limits.store', $store);
+    config()->set("http-client-rate-limits.{$key}", $value);
+
+    expect(fn () => app(RateLimitManager::class)->store())->toThrow(
+        InvalidConfigurationException::class,
+        "Configuration value [http-client-rate-limits.{$key}] must be a non-empty string",
+    );
+})->with([
+    'redis connection int' => [RedisStore::class, 'redis_connection', 1],
+    'redis connection empty' => [RedisStore::class, 'redis_connection', ''],
+    'cache store int' => [CacheStore::class, 'cache_store', 7],
+    'cache store blank' => [CacheStore::class, 'cache_store', ' '],
+    'cache prefix array' => [CacheStore::class, 'cache_prefix', ['x']],
+    'cache prefix empty' => [CacheStore::class, 'cache_prefix', ''],
+    'database connection bool' => [DatabaseStore::class, 'database_connection', true],
+    'database connection empty' => [DatabaseStore::class, 'database_connection', ''],
+]);
+
+it('uses the documented store defaults when a setting is absent (strict config)', function () {
+    config()->set('http-client-rate-limits.store', CacheStore::class);
+    config()->set('http-client-rate-limits.cache_store', null);
+    config()->set('http-client-rate-limits.cache_prefix', null);
+
+    expect(app(RateLimitManager::class)->store()->key('john'))->toBe('http-client-rate-limits:john');
 });

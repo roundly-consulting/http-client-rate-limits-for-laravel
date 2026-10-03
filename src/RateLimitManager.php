@@ -21,6 +21,7 @@ use RoundlyConsulting\HttpClientRateLimits\Store\DatabaseStore;
 use RoundlyConsulting\HttpClientRateLimits\Store\InMemoryStore;
 use RoundlyConsulting\HttpClientRateLimits\Store\RedisStore;
 use RoundlyConsulting\HttpClientRateLimits\Store\Store;
+use RoundlyConsulting\PackageToolkit\Support\Config;
 
 /**
  * The package's single entry point (the `RateLimits` facade root): resolves the configured
@@ -193,17 +194,14 @@ class RateLimitManager
         }
 
         if ($store === RedisStore::class) {
-            $connection = $this->config->get('http-client-rate-limits.redis_connection', 'default');
-            $connection = is_string($connection) ? $connection : 'default';
+            $connection = $this->stringSetting('http-client-rate-limits.redis_connection') ?? 'default';
 
             return $this->resolvedStores[$store.'|'.$connection] ??= new RedisStore($connection);
         }
 
         if ($store === CacheStore::class) {
-            $cacheStore = $this->config->get('http-client-rate-limits.cache_store');
-            $cacheStore = is_string($cacheStore) ? $cacheStore : null;
-            $cachePrefix = $this->config->get('http-client-rate-limits.cache_prefix', 'http-client-rate-limits');
-            $cachePrefix = is_string($cachePrefix) ? $cachePrefix : 'http-client-rate-limits';
+            $cacheStore = $this->stringSetting('http-client-rate-limits.cache_store');
+            $cachePrefix = $this->stringSetting('http-client-rate-limits.cache_prefix') ?? 'http-client-rate-limits';
 
             return $this->resolvedStores[$store.'|'.$cacheStore.'|'.$cachePrefix] ??= new CacheStore(
                 store: $cacheStore,
@@ -212,13 +210,25 @@ class RateLimitManager
         }
 
         if ($store === DatabaseStore::class) {
-            $connection = $this->config->get('http-client-rate-limits.database_connection');
-            $connection = is_string($connection) && $connection !== '' ? $connection : null;
+            $connection = $this->stringSetting('http-client-rate-limits.database_connection');
 
             return $this->resolvedStores[$store.'|'.$connection] ??= new DatabaseStore($connection);
         }
 
         return $this->resolvedStores[$store] ??= new $store;
+    }
+
+    /**
+     * A string store setting: null when absent (the
+     * caller's documented default applies), else a non-empty string. A non-string
+     * or blank value throws InvalidConfigurationException instead of quietly
+     * falling back to the default connection, store or prefix.
+     */
+    private function stringSetting(string $key): ?string
+    {
+        $value = $this->config->get($key);
+
+        return $value === null ? null : Config::for([$key => $value])->requireString($key);
     }
 
     private function resolveDeferrer(): Deferrer

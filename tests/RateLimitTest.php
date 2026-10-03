@@ -293,5 +293,4 @@ it('resolves a database store on the configured connection from config', functio
 })->with([
     'named' => ['rate-limits', 'rate-limits'],
     'default' => [null, null],
-    'empty env' => ['', null],
 ]);

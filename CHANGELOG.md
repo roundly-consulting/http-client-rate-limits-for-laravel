@@ -74,3 +74,9 @@ Initial public release.
 - `events_enabled` read `off` / `no` from the environment as enabled.
 - A limiter profile's `trim` / `adaptive` was cast with `(bool)`, so `off`/`no` switched it on.
   Both are read strictly now and throw on anything but a boolean spelling, naming the profile key.
+- A limiter profile's junk `rate` became 1 and a junk `max_wait` / `jitter` was ignored; a
+  non-string `by` became the global key. Numbers are read strictly now (an integer or an integer
+  string, `max_wait` / `jitter` at least 0), `per` throws `InvalidTimespanException` naming the
+  profile key, and a blank or non-string `by` throws.
+- A blank or non-string `cache_store`, `cache_prefix`, `redis_connection` or
+  `database_connection` silently used the default; it throws `InvalidConfigurationException` now.

@@ -133,16 +133,19 @@ return [
 | `limiters` | `array<string, array>` | `[]` | — | Named limiter profiles referenced by string. |
 | `store` | `class-string<Store>` | `InMemoryStore::class` | `HTTP_CLIENT_RATE_LIMITS_STORE` | Default store for new rate limits. |
 | `deferrer` | `class-string<Deferrer>` | `SleepDeferrer::class` | `HTTP_CLIENT_RATE_LIMITS_DEFERRER` | Default deferrer for new rate limits. |
-| `cache_store` | `?string` | `null` | `HTTP_CLIENT_RATE_LIMITS_CACHE_STORE` | Cache store name used by `CacheStore` (`null` = default). |
+| `cache_store` | `?string` | `null` | `HTTP_CLIENT_RATE_LIMITS_CACHE_STORE` | Cache store name used by `CacheStore` (`null`/unset = default). |
 | `cache_prefix` | `string` | `'http-client-rate-limits'` | `HTTP_CLIENT_RATE_LIMITS_CACHE_PREFIX` | Key prefix used by `CacheStore`. |
 | `redis_connection` | `string` | `'default'` | `HTTP_CLIENT_RATE_LIMITS_REDIS_CONNECTION` | Redis connection the `RedisStore` uses. |
-| `database_connection` | `?string` | `null` | `HTTP_CLIENT_RATE_LIMITS_DATABASE_CONNECTION` | Database connection the `DatabaseStore` uses (`null` = default). |
+| `database_connection` | `?string` | `null` | `HTTP_CLIENT_RATE_LIMITS_DATABASE_CONNECTION` | Database connection the `DatabaseStore` uses (`null`/unset = default). |
 | `events_enabled` | `bool` | `true` | `HTTP_CLIENT_RATE_LIMITS_EVENTS_ENABLED` | Dispatch throttling events. Accepts `true`/`false`, `1`/`0`, `on`/`off`, `yes`/`no`; anything else throws `InvalidConfigurationException`. |
 
 A configured `store`/`deferrer` that does not implement the matching contract throws a typed
 `InvalidStoreException` / `InvalidDeferrerException` (both extend `RateLimitException`) when a
 rate limit is created. A limit must allow at least one request per window: a `rate` / max
-attempts below 1 throws `InvalidLimitException`.
+attempts below 1 throws `InvalidLimitException`. The four store settings (`cache_store`,
+`cache_prefix`, `redis_connection`, `database_connection`) are read strictly when the matching
+store is resolved: a blank (`''`) or non-string value throws `InvalidConfigurationException`
+naming the key; only an unset (`null`) value uses the default.
 
 ## Usage
 
@@ -247,9 +250,19 @@ Http::rateLimit('github')->get('https://api.github.com/user');
 
 Referencing a name that isn't defined throws `UnknownLimiterProfileException`. Each profile
 array accepts `rate`, `per`, and the optional `by`, `trim`, `max_wait`, `jitter`, and
-`adaptive` keys. `trim` and `adaptive` take `true`/`false`, `1`/`0`, `on`/`off` or `yes`/`no`;
-anything else throws `InvalidConfigurationException` naming the key, e.g.
-`http-client-rate-limits.limiters.github.adaptive`.
+`adaptive` keys, each read strictly and never guessed at:
+
+- `rate`, `max_wait` and `jitter` take an integer or an integer string (`'5'`); `'five'`,
+  `'5.5'`, `'1e3'` or `''` throws `InvalidConfigurationException`, and so does a negative
+  `max_wait` / `jitter`. A `rate` below 1 throws `InvalidLimitException`.
+- `per` takes `second`, `minute`, `hour`, `day` (exact) or a `Timespan`; a typo such as
+  `minutes` throws `InvalidTimespanException`.
+- `by` takes a non-empty string; anything else throws `InvalidConfigurationException`.
+- `trim` and `adaptive` take `true`/`false`, `1`/`0`, `on`/`off` or `yes`/`no`; anything else
+  throws `InvalidConfigurationException`.
+
+Every error names the full key, e.g. `http-client-rate-limits.limiters.github.adaptive`. An
+omitted key uses its default (`rate` 1, `per` minute, no `max_wait`, `jitter` 0).
 
 ### Compound limits (several windows at once)
 

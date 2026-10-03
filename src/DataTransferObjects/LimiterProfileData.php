@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace RoundlyConsulting\HttpClientRateLimits\DataTransferObjects;
 
 use RoundlyConsulting\HttpClientRateLimits\Enums\Timespan;
+use RoundlyConsulting\HttpClientRateLimits\Exceptions\InvalidTimespanException;
 use RoundlyConsulting\HttpClientRateLimits\Limit;
 use RoundlyConsulting\PackageToolkit\Support\Config;
 
@@ -24,37 +25,46 @@ final readonly class LimiterProfileData
     ) {}
 
     /**
-     * Build from a raw config array, defaulting any omitted keys.
+     * Build from a raw config array, defaulting any omitted (or null) keys.
      *
-     * `trim` and `adaptive` are read strictly: `(bool) 'off'` is true, so an env
-     * `off`/`no` used to switch them ON. Anything but a boolean spelling throws
-     * InvalidConfigurationException naming `$key.trim` / `$key.adaptive`.
+     * Every present value is read strictly and throws naming its full key
+     * (`$key.rate`, `$key.per`, …) rather than being guessed at:
+     *
+     *  - `rate`, `max_wait` and `jitter` must be an int or a canonical integer
+     *    string (`'5'`, never `'five'` / `'5.5'` / `''`); `max_wait` and `jitter`
+     *    must be at least 0, and a `rate` below 1 throws InvalidLimitException.
+     *  - `per` must be a Timespan or one of its exact values; a typo throws
+     *    InvalidTimespanException instead of quietly becoming a minute.
+     *  - `by` must be a non-empty string.
+     *  - `trim` and `adaptive` are booleans: `(bool) 'off'` is true, so an env
+     *    `off`/`no` used to switch them ON.
+     *
+     * The rest throw InvalidConfigurationException.
      *
      * @param  array<string, mixed>  $config
      * @param  string|null  $key  the profile's config key, named in errors
      */
     public static function fromConfig(array $config, ?string $key = null): self
     {
-        $flag = static function (string $leaf) use ($config, $key): bool {
-            $name = $key === null ? $leaf : "{$key}.{$leaf}";
+        $name = static fn (string $leaf): string => $key === null ? $leaf : "{$key}.{$leaf}";
 
-            return Config::for([$name => $config[$leaf] ?? null])->boolean($name, false);
-        };
+        // Re-key the profile under its full config path so every error names it.
+        $values = [];
 
-        $rate = $config['rate'] ?? 1;
-        $per = $config['per'] ?? Timespan::Minute->value;
-        $by = $config['by'] ?? null;
-        $maxWait = $config['max_wait'] ?? null;
-        $jitter = $config['jitter'] ?? 0;
+        foreach (['rate', 'per', 'by', 'trim', 'max_wait', 'jitter', 'adaptive'] as $leaf) {
+            $values[$name($leaf)] = $config[$leaf] ?? null;
+        }
+
+        $read = Config::for($values);
 
         return new self(
-            rate: is_numeric($rate) ? (int) $rate : 1,
-            per: $per instanceof Timespan ? $per : Timespan::fromValue((string) $per),
-            by: is_string($by) ? $by : null,
-            trim: $flag('trim'),
-            maxWaitMs: is_numeric($maxWait) ? (int) $maxWait : null,
-            jitterMs: is_numeric($jitter) ? (int) $jitter : 0,
-            adaptive: $flag('adaptive'),
+            rate: $read->integer($name('rate'), 1),
+            per: Config::for($values, InvalidTimespanException::class)->enum($name('per'), Timespan::class, Timespan::Minute),
+            by: $values[$name('by')] === null ? null : $read->requireString($name('by')),
+            trim: $read->boolean($name('trim'), false),
+            maxWaitMs: $values[$name('max_wait')] === null ? null : $read->integer($name('max_wait'), 0, min: 0),
+            jitterMs: $read->integer($name('jitter'), 0, min: 0),
+            adaptive: $read->boolean($name('adaptive'), false),
         );
     }
 

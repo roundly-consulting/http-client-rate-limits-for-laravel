@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use RoundlyConsulting\HttpClientRateLimits\DataTransferObjects\LimiterProfileData;
 use RoundlyConsulting\HttpClientRateLimits\Enums\Timespan;
+use RoundlyConsulting\HttpClientRateLimits\Exceptions\InvalidTimespanException;
 use RoundlyConsulting\HttpClientRateLimits\Facades\RateLimits;
 use RoundlyConsulting\PackageToolkit\Exceptions\InvalidConfigurationException;
 
@@ -97,3 +98,66 @@ it('refuses an unreadable profile switch, naming the profile key (strict config)
         "Configuration value [http-client-rate-limits.limiters.github.{$leaf}] must be a boolean",
     );
 })->with(['trim', 'adaptive']);
+
+it('reads canonical integer strings from an env-backed profile (strict config)', function () {
+    $data = LimiterProfileData::fromConfig(['rate' => '5', 'max_wait' => ' 2000 ', 'jitter' => '50']);
+
+    expect($data->rate)->toBe(5)
+        ->and($data->maxWaitMs)->toBe(2_000)
+        ->and($data->jitterMs)->toBe(50);
+});
+
+it('refuses a junk profile number instead of guessing one (strict config)', function (string $leaf, mixed $value) {
+    config()->set('http-client-rate-limits.limiters.github', ['rate' => 5, $leaf => $value]);
+
+    expect(fn () => RateLimits::profile('github'))->toThrow(
+        InvalidConfigurationException::class,
+        "Configuration value [http-client-rate-limits.limiters.github.{$leaf}] must be an integer",
+    );
+})->with([
+    'rate five' => ['rate', 'five'],
+    'rate 5.5' => ['rate', '5.5'],
+    'rate empty' => ['rate', ''],
+    'max_wait soon' => ['max_wait', 'soon'],
+    'max_wait 1e3' => ['max_wait', '1e3'],
+    'max_wait bool' => ['max_wait', true],
+    'jitter 50ms' => ['jitter', '50ms'],
+    'jitter float' => ['jitter', 12.5],
+]);
+
+it('refuses a negative max_wait or jitter (strict config)', function (string $leaf) {
+    config()->set('http-client-rate-limits.limiters.github', ['rate' => 5, $leaf => '-1']);
+
+    expect(fn () => RateLimits::profile('github'))->toThrow(
+        InvalidConfigurationException::class,
+        "Configuration value [http-client-rate-limits.limiters.github.{$leaf}] must be at least 0, [-1] given.",
+    );
+})->with(['max_wait', 'jitter']);
+
+it('refuses a typo in the profile window, naming the key (strict config)', function (mixed $per) {
+    config()->set('http-client-rate-limits.limiters.github', ['rate' => 5, 'per' => $per]);
+
+    expect(fn () => RateLimits::profile('github'))->toThrow(
+        InvalidTimespanException::class,
+        'Configuration value [http-client-rate-limits.limiters.github.per] must be one of [second, minute, hour, day]',
+    );
+})->with([
+    'plural' => ['minutes'],
+    'capitalised' => ['Minute'],
+    'number' => [60],
+    'bool' => [true],
+]);
+
+it('refuses a non-string or blank profile key (strict config)', function (mixed $by) {
+    config()->set('http-client-rate-limits.limiters.github', ['rate' => 5, 'by' => $by]);
+
+    expect(fn () => RateLimits::profile('github'))->toThrow(
+        InvalidConfigurationException::class,
+        'Configuration value [http-client-rate-limits.limiters.github.by] must be a non-empty string',
+    );
+})->with([
+    'int' => [42],
+    'array' => [['tenant']],
+    'empty' => [''],
+    'blank' => ['  '],
+]);

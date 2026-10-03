@@ -117,7 +117,6 @@ it('refuses a junk profile number instead of guessing one (strict config)', func
 })->with([
     'rate five' => ['rate', 'five'],
     'rate 5.5' => ['rate', '5.5'],
-    'rate empty' => ['rate', ''],
     'max_wait soon' => ['max_wait', 'soon'],
     'max_wait 1e3' => ['max_wait', '1e3'],
     'max_wait bool' => ['max_wait', true],
@@ -148,7 +147,7 @@ it('refuses a typo in the profile window, naming the key (strict config)', funct
     'bool' => [true],
 ]);
 
-it('refuses a non-string or blank profile key (strict config)', function (mixed $by) {
+it('refuses a non-string profile key (strict config)', function (mixed $by) {
     config()->set('http-client-rate-limits.limiters.github', ['rate' => 5, 'by' => $by]);
 
     expect(fn () => RateLimits::profile('github'))->toThrow(
@@ -158,6 +157,21 @@ it('refuses a non-string or blank profile key (strict config)', function (mixed 
 })->with([
     'int' => [42],
     'array' => [['tenant']],
-    'empty' => [''],
-    'blank' => ['  '],
 ]);
+
+it('reads a blank profile value as not set, so every default applies (strict config)', function (string $blank) {
+    // A host's `KEY=` arrives as '' — exactly like an omitted key, never a throw, a 0 or false.
+    $data = LimiterProfileData::fromConfig([
+        'rate' => $blank,
+        'per' => $blank,
+        'by' => $blank,
+        'trim' => $blank,
+        'max_wait' => $blank,
+        'jitter' => $blank,
+        'adaptive' => $blank,
+    ]);
+
+    expect($data)->toEqual(LimiterProfileData::fromConfig([]))
+        ->and($data->maxWaitMs)->toBeNull()
+        ->and($data->toLimit()->getKey())->toBe('global');
+})->with(['empty env' => [''], 'whitespace' => ['  ']]);

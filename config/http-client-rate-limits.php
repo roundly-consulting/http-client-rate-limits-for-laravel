@@ -19,7 +19,8 @@ return [
     | "adaptive" (bool) keys. Referencing an undefined name throws
     | UnknownLimiterProfileException. Values are read strictly: a number that
     | isn't an integer ("five", "5.5"), a negative max_wait/jitter, a "per"
-    | typo or a blank "by" throws, naming the profile key.
+    | typo or a non-string "by" throws, naming the profile key. A blank value
+    | (a host's KEY=) is not set and takes the key's default.
     |
     */
 
@@ -38,7 +39,8 @@ return [
     | processes and servers — the CacheStore (any cache store the app already
     | runs), the RedisStore, or the DatabaseStore. Each checks and records a
     | request as one atomic step. Must implement the
-    | RoundlyConsulting\HttpClientRateLimits\Store\Store contract.
+    | RoundlyConsulting\HttpClientRateLimits\Store\Store contract. Unset or
+    | blank (HTTP_CLIENT_RATE_LIMITS_STORE=) means the InMemoryStore.
     |
     */
 
@@ -51,8 +53,8 @@ return [
     |
     | Used only when the store above is the CacheStore. "cache_store" is the
     | cache store name from config/cache.php (null = the default store) and
-    | "cache_prefix" namespaces the cache keys the package writes. A blank or
-    | non-string value throws instead of falling back to the default.
+    | "cache_prefix" namespaces the cache keys the package writes. A blank
+    | value is not set and takes the default; a non-string value throws.
     |
     */
 
@@ -68,7 +70,8 @@ return [
     | The Deferrer implementation used to read the current timestamp and pause
     | execution when a limit is reached. The default SleepDeferrer uses
     | Illuminate\Support\Sleep (millisecond precision). Must implement the
-    | RoundlyConsulting\HttpClientRateLimits\Deferrer\Deferrer contract.
+    | RoundlyConsulting\HttpClientRateLimits\Deferrer\Deferrer contract. Unset
+    | or blank means the SleepDeferrer.
     |
     */
 
@@ -81,7 +84,7 @@ return [
     |
     | The Redis connection name (from config/database.php) the RedisStore uses
     | when it is selected as the default store. Ignored for any other store.
-    | A blank or non-string value throws.
+    | A blank value is not set and takes "default"; a non-string one throws.
     |
     */
 
@@ -96,8 +99,8 @@ return [
     | uses when it is selected as the default store; null = the default
     | connection. A dedicated connection keeps the store's short locking
     | transactions out of any transaction your code has open. Ignored for any
-    | other store. A blank value throws: leave the env unset (or "null") for
-    | the default connection.
+    | other store. Unset, "null" or blank (KEY=) means the default connection;
+    | a non-string value throws.
     |
     */
 

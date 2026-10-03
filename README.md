@@ -131,12 +131,12 @@ return [
 | Key | Type | Default | Env | Purpose |
 |---|---|---|---|---|
 | `limiters` | `array<string, array>` | `[]` | — | Named limiter profiles referenced by string. |
-| `store` | `class-string<Store>` | `InMemoryStore::class` | `HTTP_CLIENT_RATE_LIMITS_STORE` | Default store for new rate limits. |
-| `deferrer` | `class-string<Deferrer>` | `SleepDeferrer::class` | `HTTP_CLIENT_RATE_LIMITS_DEFERRER` | Default deferrer for new rate limits. |
-| `cache_store` | `?string` | `null` | `HTTP_CLIENT_RATE_LIMITS_CACHE_STORE` | Cache store name used by `CacheStore` (`null`/unset = default). |
+| `store` | `class-string<Store>` | `InMemoryStore::class` | `HTTP_CLIENT_RATE_LIMITS_STORE` | Default store for new rate limits (unset or blank = `InMemoryStore`). |
+| `deferrer` | `class-string<Deferrer>` | `SleepDeferrer::class` | `HTTP_CLIENT_RATE_LIMITS_DEFERRER` | Default deferrer for new rate limits (unset or blank = `SleepDeferrer`). |
+| `cache_store` | `?string` | `null` | `HTTP_CLIENT_RATE_LIMITS_CACHE_STORE` | Cache store name used by `CacheStore` (`null`/unset/blank = default). |
 | `cache_prefix` | `string` | `'http-client-rate-limits'` | `HTTP_CLIENT_RATE_LIMITS_CACHE_PREFIX` | Key prefix used by `CacheStore`. |
 | `redis_connection` | `string` | `'default'` | `HTTP_CLIENT_RATE_LIMITS_REDIS_CONNECTION` | Redis connection the `RedisStore` uses. |
-| `database_connection` | `?string` | `null` | `HTTP_CLIENT_RATE_LIMITS_DATABASE_CONNECTION` | Database connection the `DatabaseStore` uses (`null`/unset = default). |
+| `database_connection` | `?string` | `null` | `HTTP_CLIENT_RATE_LIMITS_DATABASE_CONNECTION` | Database connection the `DatabaseStore` uses (`null`/unset/blank = default). |
 | `events_enabled` | `bool` | `true` | `HTTP_CLIENT_RATE_LIMITS_EVENTS_ENABLED` | Dispatch throttling events. Accepts `true`/`false`, `1`/`0`, `on`/`off`, `yes`/`no`; anything else throws `InvalidConfigurationException`. |
 
 A configured `store`/`deferrer` that does not implement the matching contract throws a typed
@@ -144,8 +144,9 @@ A configured `store`/`deferrer` that does not implement the matching contract th
 rate limit is created. A limit must allow at least one request per window: a `rate` / max
 attempts below 1 throws `InvalidLimitException`. The four store settings (`cache_store`,
 `cache_prefix`, `redis_connection`, `database_connection`) are read strictly when the matching
-store is resolved: a blank (`''`) or non-string value throws `InvalidConfigurationException`
-naming the key; only an unset (`null`) value uses the default.
+store is resolved: a non-string value throws `InvalidConfigurationException` naming the key.
+**Blank means not set:** an absent key, `null` and a blank value (a host's `KEY=`, empty or
+whitespace only) all use the default, for every key above.
 
 ## Usage
 
@@ -253,16 +254,17 @@ array accepts `rate`, `per`, and the optional `by`, `trim`, `max_wait`, `jitter`
 `adaptive` keys, each read strictly and never guessed at:
 
 - `rate`, `max_wait` and `jitter` take an integer or an integer string (`'5'`); `'five'`,
-  `'5.5'`, `'1e3'` or `''` throws `InvalidConfigurationException`, and so does a negative
+  `'5.5'` or `'1e3'` throws `InvalidConfigurationException`, and so does a negative
   `max_wait` / `jitter`. A `rate` below 1 throws `InvalidLimitException`.
 - `per` takes `second`, `minute`, `hour`, `day` (exact) or a `Timespan`; a typo such as
   `minutes` throws `InvalidTimespanException`.
-- `by` takes a non-empty string; anything else throws `InvalidConfigurationException`.
+- `by` takes a string; a non-string throws `InvalidConfigurationException`.
 - `trim` and `adaptive` take `true`/`false`, `1`/`0`, `on`/`off` or `yes`/`no`; anything else
   throws `InvalidConfigurationException`.
 
-Every error names the full key, e.g. `http-client-rate-limits.limiters.github.adaptive`. An
-omitted key uses its default (`rate` 1, `per` minute, no `max_wait`, `jitter` 0).
+Every error names the full key, e.g. `http-client-rate-limits.limiters.github.adaptive`. A key
+that is not set — omitted, `null` or blank (`''`, whitespace) — uses its default (`rate` 1,
+`per` minute, no `by`, no `max_wait`, `jitter` 0, `trim` and `adaptive` off).
 
 ### Compound limits (several windows at once)
 

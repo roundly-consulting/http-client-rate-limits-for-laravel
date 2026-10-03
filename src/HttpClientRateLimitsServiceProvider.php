@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace RoundlyConsulting\HttpClientRateLimits;
 
 use Illuminate\Http\Client\PendingRequest;
+use RoundlyConsulting\HttpClientRateLimits\Support\ConfigValue;
 use RoundlyConsulting\PackageToolkit\Package;
 use RoundlyConsulting\PackageToolkit\PackageServiceProvider;
 use RoundlyConsulting\PackageToolkit\Support\Config;
@@ -85,6 +86,6 @@ final class HttpClientRateLimitsServiceProvider extends PackageServiceProvider
      */
     private static function classLabel(mixed $value): string
     {
-        return is_string($value) && $value !== '' ? class_basename($value) : 'default';
+        return is_string($value) && ConfigValue::isSet($value) ? class_basename($value) : 'default';
     }
 }

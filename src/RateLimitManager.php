@@ -21,6 +21,7 @@ use RoundlyConsulting\HttpClientRateLimits\Store\DatabaseStore;
 use RoundlyConsulting\HttpClientRateLimits\Store\InMemoryStore;
 use RoundlyConsulting\HttpClientRateLimits\Store\RedisStore;
 use RoundlyConsulting\HttpClientRateLimits\Store\Store;
+use RoundlyConsulting\HttpClientRateLimits\Support\ConfigValue;
 use RoundlyConsulting\PackageToolkit\Support\Config;
 
 /**
@@ -187,7 +188,8 @@ class RateLimitManager
 
     private function resolveStore(): Store
     {
-        $store = $this->config->get('http-client-rate-limits.store', InMemoryStore::class);
+        $store = $this->config->get('http-client-rate-limits.store');
+        $store = ConfigValue::isSet($store) ? $store : InMemoryStore::class;
 
         if (! is_string($store) || ! is_a($store, Store::class, true)) {
             throw InvalidStoreException::for($store);
@@ -219,21 +221,22 @@ class RateLimitManager
     }
 
     /**
-     * A string store setting: null when absent (the
-     * caller's documented default applies), else a non-empty string. A non-string
-     * or blank value throws InvalidConfigurationException instead of quietly
+     * A string store setting: null when not set — absent, null or blank (a host's
+     * `KEY=`) — so the caller's documented default applies, else the string. A
+     * non-string value throws InvalidConfigurationException instead of quietly
      * falling back to the default connection, store or prefix.
      */
     private function stringSetting(string $key): ?string
     {
         $value = $this->config->get($key);
 
-        return $value === null ? null : Config::for([$key => $value])->requireString($key);
+        return ConfigValue::isSet($value) ? Config::for([$key => $value])->requireString($key) : null;
     }
 
     private function resolveDeferrer(): Deferrer
     {
-        $deferrer = $this->config->get('http-client-rate-limits.deferrer', SleepDeferrer::class);
+        $deferrer = $this->config->get('http-client-rate-limits.deferrer');
+        $deferrer = ConfigValue::isSet($deferrer) ? $deferrer : SleepDeferrer::class;
 
         if (! is_string($deferrer) || ! is_a($deferrer, Deferrer::class, true)) {
             throw InvalidDeferrerException::for($deferrer);

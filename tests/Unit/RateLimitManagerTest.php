@@ -128,7 +128,7 @@ it('builds a compound rate limit defaulting to a global limit when empty', funct
     expect($rateLimit->getLimiter()->getLimits())->toHaveCount(1);
 });
 
-it('refuses a non-string or blank store setting instead of using the default (strict config)', function (string $store, string $key, mixed $value) {
+it('refuses a non-string store setting instead of using the default (strict config)', function (string $store, string $key, mixed $value) {
     config()->set('http-client-rate-limits.store', $store);
     config()->set("http-client-rate-limits.{$key}", $value);
 
@@ -138,19 +138,42 @@ it('refuses a non-string or blank store setting instead of using the default (st
     );
 })->with([
     'redis connection int' => [RedisStore::class, 'redis_connection', 1],
-    'redis connection empty' => [RedisStore::class, 'redis_connection', ''],
     'cache store int' => [CacheStore::class, 'cache_store', 7],
-    'cache store blank' => [CacheStore::class, 'cache_store', ' '],
     'cache prefix array' => [CacheStore::class, 'cache_prefix', ['x']],
-    'cache prefix empty' => [CacheStore::class, 'cache_prefix', ''],
     'database connection bool' => [DatabaseStore::class, 'database_connection', true],
-    'database connection empty' => [DatabaseStore::class, 'database_connection', ''],
 ]);
 
-it('uses the documented store defaults when a setting is absent (strict config)', function () {
+it('uses the documented store defaults when a setting is not set (strict config)', function (?string $value) {
+    // Blank means not set: null and a host's `KEY=` (empty or whitespace) both take the default.
     config()->set('http-client-rate-limits.store', CacheStore::class);
-    config()->set('http-client-rate-limits.cache_store', null);
-    config()->set('http-client-rate-limits.cache_prefix', null);
+    config()->set('http-client-rate-limits.cache_store', $value);
+    config()->set('http-client-rate-limits.cache_prefix', $value);
 
-    expect(app(RateLimitManager::class)->store()->key('john'))->toBe('http-client-rate-limits:john');
-});
+    $store = app(RateLimitManager::class)->store();
+
+    expect($store->key('john'))->toBe('http-client-rate-limits:john')
+        ->and((fn () => $this->store)->call($store))->toBeNull();
+})->with(['null' => [null], 'empty env' => [''], 'whitespace' => ['  ']]);
+
+it('reads a blank connection as not set, so the default connection applies (strict config)', function (string $store, string $key, ?string $expected) {
+    config()->set('http-client-rate-limits.store', $store);
+    config()->set("http-client-rate-limits.{$key}", '');
+
+    $resolved = app(RateLimitManager::class)->store();
+
+    expect($resolved)->toBeInstanceOf($store)
+        ->and((fn () => $this->connection)->call($resolved))->toBe($expected);
+})->with([
+    'redis' => [RedisStore::class, 'redis_connection', 'default'],
+    'database' => [DatabaseStore::class, 'database_connection', null],
+]);
+
+it('reads a blank store or deferrer class as not set, so the shipped default applies (strict config)', function (?string $value) {
+    config()->set('http-client-rate-limits.store', $value);
+    config()->set('http-client-rate-limits.deferrer', $value);
+
+    $rateLimit = app(RateLimitManager::class)->perMinute(5);
+
+    expect($rateLimit->getStore())->toBeInstanceOf(InMemoryStore::class)
+        ->and($rateLimit->getDeferrer())->toBeInstanceOf(SleepDeferrer::class);
+})->with(['null' => [null], 'empty env' => [''], 'whitespace' => [' ']]);

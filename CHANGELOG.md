@@ -77,6 +77,10 @@ Initial public release.
 - A limiter profile's junk `rate` became 1 and a junk `max_wait` / `jitter` was ignored; a
   non-string `by` became the global key. Numbers are read strictly now (an integer or an integer
   string, `max_wait` / `jitter` at least 0), `per` throws `InvalidTimespanException` naming the
-  profile key, and a blank or non-string `by` throws.
-- A blank or non-string `cache_store`, `cache_prefix`, `redis_connection` or
-  `database_connection` silently used the default; it throws `InvalidConfigurationException` now.
+  profile key, and a non-string `by` throws.
+- A non-string `cache_store`, `cache_prefix`, `redis_connection` or `database_connection`
+  silently used the default; it throws `InvalidConfigurationException` now.
+- Blank means not set: a blank value (a host's `KEY=`, empty or whitespace only) reads exactly like
+  an absent key and takes its default. That covers `store`, `deferrer` (a blank one threw
+  `InvalidStoreException` / `InvalidDeferrerException`), the four store settings and every
+  profile key — a blank profile `max_wait` no longer turns into a 0 ms fail-fast ceiling.

@@ -7,6 +7,7 @@ namespace RoundlyConsulting\HttpClientRateLimits\DataTransferObjects;
 use RoundlyConsulting\HttpClientRateLimits\Enums\Timespan;
 use RoundlyConsulting\HttpClientRateLimits\Exceptions\InvalidTimespanException;
 use RoundlyConsulting\HttpClientRateLimits\Limit;
+use RoundlyConsulting\HttpClientRateLimits\Support\ConfigValue;
 use RoundlyConsulting\PackageToolkit\Support\Config;
 
 /**
@@ -25,17 +26,18 @@ final readonly class LimiterProfileData
     ) {}
 
     /**
-     * Build from a raw config array, defaulting any omitted (or null) keys.
+     * Build from a raw config array, defaulting any key that is not set: omitted,
+     * null or blank (a host's `KEY=`, empty or whitespace only).
      *
-     * Every present value is read strictly and throws naming its full key
+     * Every set value is read strictly and throws naming its full key
      * (`$key.rate`, `$key.per`, …) rather than being guessed at:
      *
      *  - `rate`, `max_wait` and `jitter` must be an int or a canonical integer
-     *    string (`'5'`, never `'five'` / `'5.5'` / `''`); `max_wait` and `jitter`
+     *    string (`'5'`, never `'five'` / `'5.5'`); `max_wait` and `jitter`
      *    must be at least 0, and a `rate` below 1 throws InvalidLimitException.
      *  - `per` must be a Timespan or one of its exact values; a typo throws
      *    InvalidTimespanException instead of quietly becoming a minute.
-     *  - `by` must be a non-empty string.
+     *  - `by` must be a string.
      *  - `trim` and `adaptive` are booleans: `(bool) 'off'` is true, so an env
      *    `off`/`no` used to switch them ON.
      *
@@ -60,9 +62,9 @@ final readonly class LimiterProfileData
         return new self(
             rate: $read->integer($name('rate'), 1),
             per: Config::for($values, InvalidTimespanException::class)->enum($name('per'), Timespan::class, Timespan::Minute),
-            by: $values[$name('by')] === null ? null : $read->requireString($name('by')),
+            by: ConfigValue::isSet($values[$name('by')]) ? $read->requireString($name('by')) : null,
             trim: $read->boolean($name('trim'), false),
-            maxWaitMs: $values[$name('max_wait')] === null ? null : $read->integer($name('max_wait'), 0, min: 0),
+            maxWaitMs: ConfigValue::isSet($values[$name('max_wait')]) ? $read->integer($name('max_wait'), 0, min: 0) : null,
             jitterMs: $read->integer($name('jitter'), 0, min: 0),
             adaptive: $read->boolean($name('adaptive'), false),
         );

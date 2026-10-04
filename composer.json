@@ -8,7 +8,7 @@
         "rate-limit",
         "throttle"
     ],
-    "homepage": "https://github.com/roundly-consulting/http-client-rate-limits-for-laravel",
+    "homepage": "https://roundly-consulting.com/open-source/docs/http-client-rate-limits-for-laravel",
     "license": "MIT",
     "authors": [
         {
@@ -17,6 +17,9 @@
             "role": "Developer"
         }
     ],
+    "support": {
+        "docs": "https://roundly-consulting.com/open-source/docs/http-client-rate-limits-for-laravel"
+    },
     "require": {
         "php": "^8.4",
         "illuminate/contracts": "^12.0|^13.0",

@@ -14,6 +14,7 @@ use RoundlyConsulting\HttpClientRateLimits\Exceptions\JobReleasedException;
 use RoundlyConsulting\HttpClientRateLimits\Facades\RateLimits;
 use RoundlyConsulting\HttpClientRateLimits\Jobs\Middleware\HandlesRateLimitRelease;
 use RoundlyConsulting\HttpClientRateLimits\Tests\Support\RateLimitedJob;
+use RoundlyConsulting\HttpClientRateLimits\Tests\Support\RetryingRateLimitedJob;
 
 /**
  * A real `database` queue and worker, so the release is judged by what Laravel's worker
@@ -122,4 +123,46 @@ it('names the limit key that released the job', function () {
             ->and($exception->job)->toBe($job)
             ->and($exception->getMessage())->toStartWith('Released job for [reports]');
     }
+});
+
+// Bug: Http::retry() retries the JobReleasedException and re-runs the middleware, so the job
+// was released once per try — on the database queue, one new copy of the job per release.
+it('releases the job once however often Http::retry() re-runs the limit', function () {
+    $job = new class
+    {
+        /** @var list<int> */
+        public array $released = [];
+
+        public function release(int $delay): void
+        {
+            $this->released[] = $delay;
+        }
+    };
+
+    Http::fake();
+    Http::rateLimit(RateLimits::perMinute(1)->by('retry-once'))->get('https://api.example.com/first');
+
+    expect(fn () => Http::retry(3, 0)
+        ->withMiddleware(RateLimits::releasingJob($job)->perMinute(1)->by('retry-once'))
+        ->get('https://api.example.com/next'))
+        ->toThrow(JobReleasedException::class);
+
+    expect($job->released)->toHaveCount(1);
+
+    Http::assertSentCount(1);
+});
+
+it('leaves one copy of a released job on the database queue under Http::retry()', function () {
+    useDatabaseQueue();
+    Http::fake();
+
+    Http::rateLimit(RateLimits::perHour(1)->by('retry-demo'))->get('https://api.example.com/first'); // window full
+    RetryingRateLimitedJob::dispatch();
+
+    workOneJob();
+
+    expect(DB::table('jobs')->count())->toBe(1)
+        ->and(DB::table('failed_jobs')->count())->toBe(0);
+
+    Http::assertSentCount(1);
 });

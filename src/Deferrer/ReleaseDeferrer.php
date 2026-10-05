@@ -18,10 +18,17 @@ use RoundlyConsulting\HttpClientRateLimits\Jobs\Middleware\HandlesRateLimitRelea
  * Give the job the HandlesRateLimitRelease middleware (or catch the exception): it ends
  * the attempt cleanly, so the worker never sees the unwind as a job exception.
  *
+ * The job is released at most once per deferrer. `Http::retry()` retries the unwind and
+ * re-runs the limit, and each further defer only throws again: a second release would put a
+ * second copy of the job on the database queue.
+ *
  * @see HandlesRateLimitRelease
  */
 final class ReleaseDeferrer implements Deferrer
 {
+    /** The delay (seconds) the job was released with, or null before its release. */
+    private ?int $releasedSeconds = null;
+
     public function __construct(private readonly object $job)
     {
         if (! method_exists($this->job, 'release')) {
@@ -39,11 +46,13 @@ final class ReleaseDeferrer implements Deferrer
 
     public function defer(int $ms, string $key): void
     {
-        // Laravel's release() delay is in seconds; round up so we never re-run early.
-        $seconds = (int) ceil($ms / 1000);
+        if ($this->releasedSeconds === null) {
+            // Laravel's release() delay is in seconds; round up so we never re-run early.
+            $this->releasedSeconds = (int) ceil($ms / 1000);
 
-        $this->job->release($seconds);
+            $this->job->release($this->releasedSeconds);
+        }
 
-        throw new JobReleasedException($seconds, $key, $this->job);
+        throw new JobReleasedException($this->releasedSeconds, $key, $this->job);
     }
 }

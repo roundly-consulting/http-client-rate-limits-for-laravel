@@ -43,6 +43,28 @@ it('releases the job with the delay in seconds and throws to unwind', function (
     }
 });
 
+it('releases the job only on its first defer and unwinds on every one', function () {
+    $job = new class
+    {
+        /** @var list<int> */
+        public array $released = [];
+
+        public function release(int $delay): void
+        {
+            $this->released[] = $delay;
+        }
+    };
+
+    $deferrer = new ReleaseDeferrer($job);
+
+    expect(fn () => $deferrer->defer(4_200, 'api'))->toThrow(JobReleasedException::class)
+        ->and(fn () => $deferrer->defer(9_000, 'other'))->toThrow(
+            JobReleasedException::class,
+            'Released job for [other] back onto the queue with a 5s delay.',
+        )
+        ->and($job->released)->toBe([5]);
+});
+
 it('throws when the job does not expose a release method', function () {
     new ReleaseDeferrer(new stdClass);
 })->throws(InvalidDeferrerException::class);

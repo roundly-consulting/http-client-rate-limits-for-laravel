@@ -6,6 +6,8 @@ namespace RoundlyConsulting\HttpClientRateLimits\Store;
 
 use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Builder;
+use RoundlyConsulting\Crypto\Hash\Digest;
+use RoundlyConsulting\Crypto\Hash\HashAlgorithm;
 use RoundlyConsulting\HttpClientRateLimits\DataTransferObjects\AttemptResult;
 use RoundlyConsulting\HttpClientRateLimits\Models\RateLimitHit;
 use RoundlyConsulting\HttpClientRateLimits\Models\RateLimitOwner;
@@ -26,6 +28,11 @@ use RoundlyConsulting\HttpClientRateLimits\Support\Windows;
  * REPEATABLE READ answers a plain read from the snapshot the transaction's first read took —
  * before a later owner lock was won, or while a host transaction it runs in was open — and
  * would miss hits other workers committed since. A locking read sees the latest commit.
+ *
+ * Keys are stored as given while they fit the 255-character `owner` columns. A longer one (or
+ * one that starts like the hashed form) is stored as `sha256:` + its SHA-256 (crypto-for-laravel's
+ * `Digest`), the same way for hits and owner rows, so it neither overflows the column nor shares
+ * a row with another key.
  */
 final class DatabaseStore implements Store
 {
@@ -34,6 +41,12 @@ final class DatabaseStore implements Store
 
     /** Retries when the engine picks this transaction as a deadlock victim. */
     protected const TRANSACTION_ATTEMPTS = 3;
+
+    /** The length of both `owner` columns (`string()`: varchar(255)). */
+    protected const OWNER_MAX_LENGTH = 255;
+
+    /** Marks a key stored as its hash. */
+    protected const HASHED_OWNER_PREFIX = 'sha256:';
 
     public function __construct(protected ?string $connection = null) {}
 
@@ -56,7 +69,7 @@ final class DatabaseStore implements Store
             }
 
             foreach (Windows::storeKeys($limits) as $storeKey) {
-                $this->hitRows()->create(['owner' => $storeKey, 'hit_at' => $timestamp]);
+                $this->hitRows()->create(['owner' => $this->column($storeKey), 'hit_at' => $timestamp]);
             }
 
             foreach ($limits as $limit) {
@@ -80,7 +93,7 @@ final class DatabaseStore implements Store
     public function hit(string $owner, int $timestamp): void
     {
         $this->hitRows()->create([
-            'owner' => $owner,
+            'owner' => $this->column($owner),
             'hit_at' => $timestamp,
         ]);
 
@@ -109,7 +122,7 @@ final class DatabaseStore implements Store
     protected function readHits(string $owner, int $timestamp, bool $locking): array
     {
         $hits = $this->hitRows()
-            ->where('owner', $owner)
+            ->where('owner', $this->column($owner))
             ->where('hit_at', '>=', $timestamp)
             ->when($locking, static fn (Builder $query): Builder => $query->sharedLock())
             ->orderBy('hit_at')
@@ -129,7 +142,7 @@ final class DatabaseStore implements Store
     {
         $this->hitRows()
             ->withTrashed()
-            ->where('owner', $owner)
+            ->where('owner', $this->column($owner))
             ->where('hit_at', '<=', $timestamp)
             ->forceDelete();
     }
@@ -140,7 +153,7 @@ final class DatabaseStore implements Store
 
         // One conditional UPDATE keeps the later penalty without a read-modify-write race.
         $this->ownerRows()
-            ->where('owner', $owner)
+            ->where('owner', $this->column($owner))
             ->where(static function (Builder $query) use ($timestamp): void {
                 $query->whereNull('penalized_until')->orWhere('penalized_until', '<', $timestamp);
             })
@@ -149,7 +162,7 @@ final class DatabaseStore implements Store
 
     public function penalizedUntil(string $owner): ?int
     {
-        $value = $this->ownerRows()->where('owner', $owner)->value('penalized_until');
+        $value = $this->ownerRows()->where('owner', $this->column($owner))->value('penalized_until');
 
         return is_numeric($value) ? (int) $value : null;
     }
@@ -175,7 +188,7 @@ final class DatabaseStore implements Store
             }
 
             $value = $this->ownerRows()
-                ->where('owner', $owner)
+                ->where('owner', $this->column($owner))
                 ->when($locking, static fn (Builder $query): Builder => $query->sharedLock())
                 ->value('penalized_until');
             $penalties[$owner] = is_numeric($value) ? (int) $value : null;
@@ -196,12 +209,25 @@ final class DatabaseStore implements Store
 
     protected function touch(string $owner, int $timestamp): int
     {
-        return $this->ownerRows()->where('owner', $owner)->update(['touched_at' => $timestamp]);
+        return $this->ownerRows()->where('owner', $this->column($owner))->update(['touched_at' => $timestamp]);
     }
 
     protected function ensureOwner(string $owner, int $touchedAt): void
     {
-        $this->ownerRows()->createOrFirst(['owner' => $owner], ['touched_at' => $touchedAt]);
+        $this->ownerRows()->createOrFirst(['owner' => $this->column($owner)], ['touched_at' => $touchedAt]);
+    }
+
+    /**
+     * The value a key is stored under in an `owner` column: the key while it fits and cannot be
+     * mistaken for a hash, else `sha256:` + its SHA-256 (71 characters).
+     */
+    protected function column(string $owner): string
+    {
+        if (strlen($owner) <= self::OWNER_MAX_LENGTH && ! str_starts_with($owner, self::HASHED_OWNER_PREFIX)) {
+            return $owner;
+        }
+
+        return self::HASHED_OWNER_PREFIX.new Digest(HashAlgorithm::Sha256)->hex($owner);
     }
 
     /**

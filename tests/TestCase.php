@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace RoundlyConsulting\HttpClientRateLimits\Tests;
 
 use Illuminate\Support\ServiceProvider;
+use RoundlyConsulting\Crypto\CryptoServiceProvider;
 use RoundlyConsulting\HttpClientRateLimits\HttpClientRateLimitsServiceProvider;
 use RoundlyConsulting\Testing\PackageTestCase;
 
@@ -18,7 +19,7 @@ abstract class TestCase extends PackageTestCase
      */
     protected function packageProviders(): array
     {
-        return [HttpClientRateLimitsServiceProvider::class];
+        return [CryptoServiceProvider::class, HttpClientRateLimitsServiceProvider::class];
     }
 
     /**

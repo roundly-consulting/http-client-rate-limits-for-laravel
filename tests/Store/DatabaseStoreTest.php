@@ -3,6 +3,9 @@
 declare(strict_types=1);
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use RoundlyConsulting\Crypto\Hash\Digest;
+use RoundlyConsulting\Crypto\Hash\HashAlgorithm;
+use RoundlyConsulting\HttpClientRateLimits\Limit;
 use RoundlyConsulting\HttpClientRateLimits\Models\RateLimitHit;
 use RoundlyConsulting\HttpClientRateLimits\Models\RateLimitOwner;
 use RoundlyConsulting\HttpClientRateLimits\Store\DatabaseStore;
@@ -108,4 +111,38 @@ it('keeps hits inside the retention window on write', function () {
     $store->hit('john', 1_000 + 86_400_000);
 
     expect($store->hits('john'))->toBe([1_000, 1_000 + 86_400_000]);
+});
+
+// Bug: both owner columns are varchar(255) and keys were written as given, so a `by` key past
+// ~248 chars threw "Data too long" on every request (MySQL strict, Postgres) or was truncated,
+// and the limit silently never matched (MySQL non-strict).
+it('keeps an over-long key inside the owner columns, on a budget of its own', function () {
+    $store = new DatabaseStore;
+    $long = str_repeat('k', 300);
+    $twin = str_repeat('k', 299).'j'; // the same first 255 characters
+
+    expect($store->attempt([new Limit($long, 1, 'second')], 5_000)->allowed)->toBeTrue()
+        ->and($store->attempt([new Limit($long, 1, 'second')], 5_100)->allowed)->toBeFalse()
+        ->and($store->attempt([new Limit($twin, 1, 'second')], 5_100)->allowed)->toBeTrue()
+        ->and($store->hits("{$long}:second"))->toBe([5_000])
+        ->and($store->hits("{$twin}:second"))->toBe([5_100]);
+
+    $store->penalizeUntil($long, 9_000);
+    $store->clear("{$twin}:second", PHP_INT_MAX);
+
+    expect($store->penalizedUntil($long))->toBe(9_000)
+        ->and($store->penalizedUntil($twin))->toBeNull()
+        ->and($store->hits("{$twin}:second"))->toBe([])
+        ->and(RateLimitHit::query()->pluck('owner')->map(strlen(...))->max())->toBeLessThanOrEqual(255)
+        ->and(RateLimitOwner::withTrashed()->pluck('owner')->map(strlen(...))->max())->toBeLessThanOrEqual(255);
+});
+
+it('never lets a short key pose as the stored form of a long one', function () {
+    $store = new DatabaseStore;
+    $long = str_repeat('k', 300);
+
+    $store->penalizeUntil($long, 9_000);
+    $store->penalizeUntil('sha256:'.new Digest(HashAlgorithm::Sha256)->hex($long), 20_000);
+
+    expect($store->penalizedUntil($long))->toBe(9_000);
 });

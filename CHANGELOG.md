@@ -6,6 +6,36 @@ All notable changes to `http-client-rate-limits-for-laravel` are documented in t
 
 ## Unreleased
 
+### Changed
+
+- Limiter profiles no longer share the `global` bucket: a profile without `by` is keyed by its
+  own name, so each keeps its own budget and one API's `Retry-After` no longer stalls the rest.
+  To keep profiles on one budget, give them the same `by` (`'by' => 'global'` restores the old
+  sharing).
+- `Http::rateLimit([...])` throws `InvalidLimitException` for an empty array or an entry that
+  is not a `Limit`, a `RateLimit`, a profile name or an integer, instead of dropping it and
+  running under a default 60-per-second `global` limit. Pass only those four; profile names
+  and integers in the array now work as they do on their own.
+
+### Fixed
+
+- `RateLimits::releasingJob()` together with `Http::retry()` released the job once per try, and
+  the database queue added a new copy of the job for each release. The job is released once.
+- On MySQL/MariaDB the `DatabaseStore` could let a compound limit, or an attempt inside a host
+  transaction, past its budget: its reads saw an old REPEATABLE READ snapshot and missed hits
+  other workers had just committed. Reads inside an attempt now lock and see the latest hits.
+- `RateLimits::fake()` recorded nothing while `Event::fake()` was active, so `assertDeferred()`
+  failed and `assertNothingDeferred()` passed although requests waited. The fake now records
+  the limits it builds directly.
+- The fake's clock ignored Carbon test time, so after `travel()` past a window it still
+  deferred. It now follows test time, unless built with an explicit start.
+- An adaptive limit around a callback that calls `->throw()` ignored the 429's `Retry-After`;
+  it now records the backoff before rethrowing.
+- A fractional `X-RateLimit-Reset` (`1790000030.250`) was ignored; it is now rounded up to the
+  next second.
+- The `InMemoryStore` never dropped idle owners or expired penalties, so a long-running worker
+  keyed per user kept growing. It now sweeps them at most once a minute.
+
 ## 1.0.0 - 2026-10-03
 
 Initial public release.

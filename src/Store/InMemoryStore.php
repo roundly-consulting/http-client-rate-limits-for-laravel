@@ -15,11 +15,21 @@ use RoundlyConsulting\HttpClientRateLimits\Support\Windows;
  *
  * `attempt()` is atomic by construction: PHP runs it start to finish in one process,
  * and nothing outside that process can see this store.
+ *
+ * It stays bounded in a long-running worker: at most once a minute (by hit time) a hit sweeps
+ * the whole store of owners whose newest hit, and penalties whose end, lies further back than
+ * the retention — entries no window can see any more.
  */
 final class InMemoryStore implements Store
 {
     /** One day (the largest supported window) plus a generous margin, in milliseconds. */
     protected const RETENTION_MS = (86_400 + 3_600) * 1_000;
+
+    /** How often (by hit time, ms) a hit sweeps the whole store. */
+    protected const SWEEP_INTERVAL_MS = 60_000;
+
+    /** The hit time (ms) from which the next hit sweeps the whole store. */
+    protected int $nextSweepAt = 0;
 
     /** @var array<string, list<int>> */
     protected array $timestamps = [];
@@ -74,6 +84,8 @@ final class InMemoryStore implements Store
         }
 
         $this->timestamps[$owner] = $hits;
+
+        $this->sweep($timestamp);
     }
 
     /**
@@ -96,9 +108,17 @@ final class InMemoryStore implements Store
 
     public function clear(string $owner, int $timestamp): void
     {
-        $this->timestamps[$owner] = array_values(
+        $hits = array_values(
             array_filter($this->hits($owner), fn (int $record) => $record > $timestamp),
         );
+
+        if ($hits === []) {
+            unset($this->timestamps[$owner]);
+
+            return;
+        }
+
+        $this->timestamps[$owner] = $hits;
     }
 
     public function penalizeUntil(string $owner, int $timestamp): void
@@ -109,5 +129,32 @@ final class InMemoryStore implements Store
     public function penalizedUntil(string $owner): ?int
     {
         return $this->penalties[$owner] ?? null;
+    }
+
+    /**
+     * Drop every owner whose newest hit, and every penalty whose end, is older than the
+     * retention: no window or wait can read them any more, so results never change.
+     */
+    protected function sweep(int $timestamp): void
+    {
+        if ($timestamp < $this->nextSweepAt) {
+            return;
+        }
+
+        $this->nextSweepAt = $timestamp + self::SWEEP_INTERVAL_MS;
+        $oldest = $timestamp - self::RETENTION_MS;
+
+        foreach ($this->timestamps as $owner => $hits) {
+            // Oldest first, so the last hit is the newest.
+            if ($hits === [] || $hits[array_key_last($hits)] < $oldest) {
+                unset($this->timestamps[$owner]);
+            }
+        }
+
+        foreach ($this->penalties as $owner => $until) {
+            if ($until < $oldest) {
+                unset($this->penalties[$owner]);
+            }
+        }
     }
 }

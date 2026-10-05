@@ -16,8 +16,10 @@ return [
     | them at every call site: Http::rateLimit('github')->get(...). Each profile
     | is an array with: "rate" (int), "per" (second|minute|hour|day), and the
     | optional "by", "trim" (bool), "max_wait" (ms), "jitter" (ms), and
-    | "adaptive" (bool) keys. Referencing an undefined name throws
-    | UnknownLimiterProfileException. Values are read strictly: a number that
+    | "adaptive" (bool) keys. Without "by" a profile is keyed by its own name,
+    | so each profile keeps its own budget and its own server backoff; give
+    | profiles the same "by" to make them share one. Referencing an undefined
+    | name throws UnknownLimiterProfileException. Values are read strictly: a number that
     | isn't an integer ("five", "5.5"), a negative max_wait/jitter, a "per"
     | typo or a non-string "by" throws, naming the profile key. A blank value
     | (a host's KEY=) is not set and takes the key's default.

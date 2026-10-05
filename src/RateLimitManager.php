@@ -124,7 +124,8 @@ class RateLimitManager
     }
 
     /**
-     * Build a RateLimit from a named profile defined under the [limiters] config key.
+     * Build a RateLimit from a named profile defined under the [limiters] config key. A profile
+     * without `by` is keyed by its name, so each profile keeps its own budget.
      */
     public function profile(string $name): RateLimit
     {
@@ -137,7 +138,7 @@ class RateLimitManager
         /** @var array<string, mixed> $profileConfig */
         $profileConfig = $limiters[$name];
 
-        return $this->make(LimiterProfileData::fromConfig($profileConfig, "http-client-rate-limits.limiters.{$name}")->toLimit());
+        return $this->make(LimiterProfileData::fromConfig($profileConfig, "http-client-rate-limits.limiters.{$name}", $name)->toLimit());
     }
 
     /**

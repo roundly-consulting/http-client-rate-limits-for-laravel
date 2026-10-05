@@ -66,13 +66,20 @@ it('converts to a configured Limit', function () {
         ->and($limit->isAdaptive())->toBeTrue();
 });
 
-it('defaults the limit key to global without a by', function () {
-    $limit = LimiterProfileData::fromConfig(['rate' => 2, 'per' => 'minute'])->toLimit();
+// Changed deliberately (chat-review C-1): this pinned `global`, so every profile without a `by`
+// shared one bucket and one API's Retry-After penalty stalled all the others.
+it('defaults the limit key to the profile name without a by', function () {
+    $limit = LimiterProfileData::fromConfig(['rate' => 2, 'per' => 'minute'], name: 'github')->toLimit();
 
-    expect($limit->getKey())->toBe('global')
+    expect($limit->getKey())->toBe('github')
         ->and($limit->getMaxWait())->toBeNull()
         ->and($limit->getJitter())->toBe(0)
         ->and($limit->isAdaptive())->toBeFalse();
+});
+
+it('keys a profile on its by over its name, and a nameless one on global', function () {
+    expect(LimiterProfileData::fromConfig(['by' => 'gh'], name: 'github')->toLimit()->getKey())->toBe('gh')
+        ->and(LimiterProfileData::fromConfig([])->toLimit()->getKey())->toBe('global');
 });
 
 it('reads env-style trim and adaptive switches as booleans', function (string $value, bool $expected) {
@@ -169,9 +176,10 @@ it('reads a blank profile value as not set, so every default applies (strict con
         'max_wait' => $blank,
         'jitter' => $blank,
         'adaptive' => $blank,
-    ]);
+    ], name: 'github');
 
-    expect($data)->toEqual(LimiterProfileData::fromConfig([]))
+    expect($data)->toEqual(LimiterProfileData::fromConfig([], name: 'github'))
         ->and($data->maxWaitMs)->toBeNull()
-        ->and($data->toLimit()->getKey())->toBe('global');
+        // Changed deliberately (chat-review C-1): a blank `by` keys the profile on its name, not `global`.
+        ->and($data->toLimit()->getKey())->toBe('github');
 })->with(['empty env' => [''], 'whitespace' => ['  ']]);

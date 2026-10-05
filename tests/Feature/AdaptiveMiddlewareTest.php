@@ -127,3 +127,32 @@ it('reports nothing remaining while a server penalty is in force', function () {
         ->and($limit->tooManyAttempts())->toBeTrue()
         ->and($limit->remaining())->toBe(0);
 });
+
+// Bug: profiles without `by` all shared the `global` key, so GitHub's one-hour Retry-After
+// stalled Stripe (and every unkeyed limit) for that hour.
+it('keeps each profile without a by on its own budget, keyed by its name', function () {
+    config()->set('http-client-rate-limits.limiters', [
+        'github' => ['rate' => 5, 'per' => 'second', 'adaptive' => true],
+        'stripe' => ['rate' => 100, 'per' => 'second'],
+    ]);
+
+    $fake = RateLimits::fake();
+
+    Http::fake([
+        'api.github.com/*' => Http::response('slow down', 429, ['Retry-After' => '3600']),
+        '*' => Http::response('ok'),
+    ]);
+
+    Http::rateLimit('github')->get('https://api.github.com/user');
+    Http::rateLimit('stripe')->get('https://api.stripe.com/v1/charges');
+    Http::rateLimit(30)->get('https://api.example.com/things');
+
+    $fake->assertNothingDeferred()
+        ->assertAllowed('github')
+        ->assertAllowed('stripe');
+
+    expect($fake->store()->penalizedUntil('github'))->not->toBeNull()
+        ->and($fake->store()->penalizedUntil('global'))->toBeNull()
+        ->and($fake->store()->hits('github:second'))->toHaveCount(1)
+        ->and($fake->store()->hits('stripe:second'))->toHaveCount(1);
+});

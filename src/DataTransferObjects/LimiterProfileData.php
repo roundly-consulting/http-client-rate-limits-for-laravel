@@ -23,6 +23,7 @@ final readonly class LimiterProfileData
         public ?int $maxWaitMs = null,
         public int $jitterMs = 0,
         public bool $adaptive = false,
+        public ?string $name = null,
     ) {}
 
     /**
@@ -37,7 +38,8 @@ final readonly class LimiterProfileData
      *    must be at least 0, and a `rate` below 1 throws InvalidLimitException.
      *  - `per` must be a Timespan or one of its exact values; a typo throws
      *    InvalidTimespanException instead of quietly becoming a minute.
-     *  - `by` must be a string.
+     *  - `by` must be a string. Without one the limit is keyed by the profile `$name`, so
+     *    every profile counts on its own budget (and takes its own server penalties).
      *  - `trim` and `adaptive` are booleans: `(bool) 'off'` is true, so an env
      *    `off`/`no` used to switch them ON.
      *
@@ -45,35 +47,41 @@ final readonly class LimiterProfileData
      *
      * @param  array<string, mixed>  $config
      * @param  string|null  $key  the profile's config key, named in errors
+     * @param  string|null  $name  the profile's name, its limit key when `by` is not set
      */
-    public static function fromConfig(array $config, ?string $key = null): self
+    public static function fromConfig(array $config, ?string $key = null, ?string $name = null): self
     {
-        $name = static fn (string $leaf): string => $key === null ? $leaf : "{$key}.{$leaf}";
+        $path = static fn (string $leaf): string => $key === null ? $leaf : "{$key}.{$leaf}";
 
         // Re-key the profile under its full config path so every error names it.
         $values = [];
 
         foreach (['rate', 'per', 'by', 'trim', 'max_wait', 'jitter', 'adaptive'] as $leaf) {
-            $values[$name($leaf)] = $config[$leaf] ?? null;
+            $values[$path($leaf)] = $config[$leaf] ?? null;
         }
 
         $read = Config::for($values);
 
         return new self(
-            rate: $read->integer($name('rate'), 1),
-            per: Config::for($values, InvalidTimespanException::class)->enum($name('per'), Timespan::class, Timespan::Minute),
-            by: ConfigValue::isSet($values[$name('by')]) ? $read->requireString($name('by')) : null,
-            trim: $read->boolean($name('trim'), false),
-            maxWaitMs: ConfigValue::isSet($values[$name('max_wait')]) ? $read->integer($name('max_wait'), 0, min: 0) : null,
-            jitterMs: $read->integer($name('jitter'), 0, min: 0),
-            adaptive: $read->boolean($name('adaptive'), false),
+            rate: $read->integer($path('rate'), 1),
+            per: Config::for($values, InvalidTimespanException::class)->enum($path('per'), Timespan::class, Timespan::Minute),
+            by: ConfigValue::isSet($values[$path('by')]) ? $read->requireString($path('by')) : null,
+            trim: $read->boolean($path('trim'), false),
+            maxWaitMs: ConfigValue::isSet($values[$path('max_wait')]) ? $read->integer($path('max_wait'), 0, min: 0) : null,
+            jitterMs: $read->integer($path('jitter'), 0, min: 0),
+            adaptive: $read->boolean($path('adaptive'), false),
+            name: $name,
         );
     }
 
+    /**
+     * The profile as a Limit keyed by `by`, else by the profile's name — never a bucket shared
+     * with other profiles. Only a profile built without a name falls back to `global`.
+     */
     public function toLimit(): Limit
     {
         $limit = new Limit(
-            key: $this->by ?? 'global',
+            key: $this->by ?? $this->name ?? 'global',
             maxAttempts: $this->rate,
             timespan: $this->per,
             trim: $this->trim,

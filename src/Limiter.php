@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\HttpClientRateLimits;
 
+use Closure;
 use GuzzleHttp\Promise\PromiseInterface;
 use Illuminate\Http\Client\Response;
 use Psr\Http\Message\ResponseInterface;
@@ -30,6 +31,9 @@ final class Limiter
     protected array $additionalLimits = [];
 
     protected Randomizer $randomizer;
+
+    /** @var (Closure(RequestDeferred|RequestAllowed|RateLimitReset): void)|null */
+    protected ?Closure $recorder = null;
 
     public function __construct(
         protected Limit $limit,
@@ -93,6 +97,22 @@ final class Limiter
     public function setRandomizer(Randomizer $randomizer): self
     {
         $this->randomizer = $randomizer;
+
+        return $this;
+    }
+
+    /**
+     * Hand every event this limiter raises to `$recorder` too, straight from the limiter —
+     * whatever `events_enabled` says and whether or not the dispatcher is faked. Clones share
+     * it. How `RateLimits::fake()` records.
+     *
+     * @internal
+     *
+     * @param  (Closure(RequestDeferred|RequestAllowed|RateLimitReset): void)|null  $recorder
+     */
+    public function setRecorder(?Closure $recorder): self
+    {
+        $this->recorder = $recorder;
 
         return $this;
     }
@@ -444,6 +464,10 @@ final class Limiter
 
     protected function dispatch(RequestDeferred|RequestAllowed|RateLimitReset $event): void
     {
+        if ($this->recorder !== null) {
+            ($this->recorder)($event);
+        }
+
         if (! $this->eventsEnabled()) {
             return;
         }

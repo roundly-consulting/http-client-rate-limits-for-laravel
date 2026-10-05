@@ -49,8 +49,9 @@ final class RateLimits extends Facade
 
         $fake = new RateLimitsFake($app->make('config'));
 
-        // Capture the package's own events into the fake; force them on so the
-        // assertions work regardless of the host's events_enabled setting.
+        // The limits the fake builds record into it directly. These listeners catch a limit
+        // built before the swap; events are forced on so they fire whatever the host's
+        // events_enabled says.
         $app->make('config')->set('http-client-rate-limits.events_enabled', true);
 
         $events = $app->make('events');

@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 use PHPUnit\Framework\AssertionFailedError;
 use RoundlyConsulting\HttpClientRateLimits\Exceptions\JobReleasedException;
@@ -147,4 +148,67 @@ it('really releases the job for releasingJob() under the fake', function () {
         ->and($job->released[0])->toBeGreaterThan(3_500)->toBeLessThanOrEqual(3_600);
 
     $fake->assertDeferred('fake-job');
+});
+
+// Bug: the fake recorded through the event dispatcher, so under Event::fake() (in either order)
+// it saw nothing: assertDeferred() failed and assertNothingDeferred() passed while requests waited.
+it('records under Event::fake(), whichever is faked first', function (bool $eventsFirst) {
+    if ($eventsFirst) {
+        Event::fake();
+    }
+
+    $fake = RateLimits::fake();
+
+    if (! $eventsFirst) {
+        Event::fake();
+    }
+
+    Http::rateLimit(1, by: 'ev-1')->get('https://api.example.com/one');
+    Http::rateLimit(1, by: 'ev-1')->get('https://api.example.com/two');
+    RateLimits::perMinute(1)->by('ev-1')->reset();
+
+    $fake->assertDeferred('ev-1')
+        ->assertAllowed('ev-1')
+        ->assertReset('ev-1');
+
+    expect($fake->deferredCount())->toBe(1)
+        ->and($fake->allowedCount())->toBe(2)
+        ->and($fake->deferrer()->deferCount())->toBe(1);
+})->with([
+    'events faked first' => [true],
+    'rate limits faked first' => [false],
+]);
+
+it('records under Event::fake() through usingStore() and releasingJob()', function () {
+    $fake = RateLimits::fake();
+    Event::fake();
+    $job = new class
+    {
+        public function release(int $delay): void {}
+    };
+
+    Http::rateLimit(RateLimits::usingStore(new InMemoryStore)->perSecond(5)->by('ev-store'))->get('https://api.example.com/one');
+    Http::rateLimit(RateLimits::perHour(1)->by('ev-job'))->get('https://api.example.com/two');
+
+    try {
+        Http::rateLimit(RateLimits::releasingJob($job)->perHour(1)->by('ev-job'))->get('https://api.example.com/three');
+    } catch (JobReleasedException) {
+        // released, as expected
+    }
+
+    $fake->assertAllowed('ev-store')->assertDeferred('ev-job');
+
+    expect($fake->allowedCount())->toBe(2)
+        ->and($fake->deferredCount())->toBe(1);
+});
+
+it('still records a limit built before the fake was swapped in, once', function () {
+    $early = RateLimits::usingDeferrer(new TestDeferrer(1_000_000))->perMinute(5)->by('early');
+    $fake = RateLimits::fake();
+
+    Http::rateLimit($early)->get('https://api.example.com/one');
+
+    $fake->assertAllowed('early');
+
+    expect($fake->allowedCount())->toBe(1);
 });

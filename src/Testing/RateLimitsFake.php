@@ -24,6 +24,10 @@ use RoundlyConsulting\HttpClientRateLimits\Store\Store;
  * without Redis or real waits. Records allowed, deferred and reset limits — through
  * the facade, an injected manager and `Http::rateLimit()` alike.
  *
+ * Every limit it builds hands its events to the fake directly, not through the event
+ * dispatcher, so `Event::fake()` (before or after) cannot hide them. A limit built before the
+ * fake was swapped in is still recorded through the dispatcher, once.
+ *
  * `usingStore()`, `usingDeferrer()` and `releasingJob()` are honoured: they return a
  * manager on the override, keeping the fake's recording store/deferrer for the other half —
  * so a released job really is released, and its events are still recorded here.
@@ -58,43 +62,65 @@ final class RateLimitsFake extends RateLimitManager
     {
         return (new RateLimitManager($this->config))
             ->usingStore($store)
-            ->usingDeferrer($this->sharedDeferrer);
+            ->usingDeferrer($this->sharedDeferrer)
+            ->recordingTo($this->record(...));
     }
 
     public function usingDeferrer(Deferrer $deferrer): RateLimitManager
     {
         return (new RateLimitManager($this->config))
             ->usingStore($this->sharedStore)
-            ->usingDeferrer($deferrer);
+            ->usingDeferrer($deferrer)
+            ->recordingTo($this->record(...));
     }
 
     public function make(Limit $limit): RateLimit
     {
-        return new RateLimit(
-            new Limiter(
-                limit: $limit,
-                store: $this->sharedStore,
-                deferrer: $this->sharedDeferrer,
-            ),
+        $limiter = new Limiter(
+            limit: $limit,
+            store: $this->sharedStore,
+            deferrer: $this->sharedDeferrer,
         );
+
+        return new RateLimit($limiter->setRecorder($this->record(...)));
     }
 
     /** @internal the RequestDeferred listener RateLimits::fake() registers */
     public function recordDeferred(RequestDeferred $event): void
     {
-        $this->deferred[] = $event;
+        // The limiter's own recorder may have seen this very event already.
+        if (! in_array($event, $this->deferred, true)) {
+            $this->deferred[] = $event;
+        }
     }
 
     /** @internal the RequestAllowed listener RateLimits::fake() registers */
     public function recordAllowed(RequestAllowed $event): void
     {
-        $this->allowed[] = $event;
+        if (! in_array($event, $this->allowed, true)) {
+            $this->allowed[] = $event;
+        }
     }
 
     /** @internal the RateLimitReset listener RateLimits::fake() registers */
     public function recordReset(RateLimitReset $event): void
     {
-        $this->reset[] = $event;
+        if (! in_array($event, $this->reset, true)) {
+            $this->reset[] = $event;
+        }
+    }
+
+    /**
+     * The recorder every limit the fake builds calls directly — independent of the event
+     * dispatcher, so `Event::fake()` cannot swallow what the fake must see.
+     */
+    private function record(RequestDeferred|RequestAllowed|RateLimitReset $event): void
+    {
+        match (true) {
+            $event instanceof RequestDeferred => $this->recordDeferred($event),
+            $event instanceof RequestAllowed => $this->recordAllowed($event),
+            $event instanceof RateLimitReset => $this->recordReset($event),
+        };
     }
 
     public function deferrer(): RecordingDeferrer

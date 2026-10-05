@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace RoundlyConsulting\HttpClientRateLimits;
 
 use ArrayObject;
+use Closure;
 use Illuminate\Contracts\Config\Repository;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Client\Response;
@@ -13,6 +14,9 @@ use RoundlyConsulting\HttpClientRateLimits\Deferrer\Deferrer;
 use RoundlyConsulting\HttpClientRateLimits\Deferrer\ReleaseDeferrer;
 use RoundlyConsulting\HttpClientRateLimits\Deferrer\SleepDeferrer;
 use RoundlyConsulting\HttpClientRateLimits\Enums\Timespan;
+use RoundlyConsulting\HttpClientRateLimits\Events\RateLimitReset;
+use RoundlyConsulting\HttpClientRateLimits\Events\RequestAllowed;
+use RoundlyConsulting\HttpClientRateLimits\Events\RequestDeferred;
 use RoundlyConsulting\HttpClientRateLimits\Exceptions\InvalidDeferrerException;
 use RoundlyConsulting\HttpClientRateLimits\Exceptions\InvalidStoreException;
 use RoundlyConsulting\HttpClientRateLimits\Exceptions\UnknownLimiterProfileException;
@@ -40,6 +44,9 @@ class RateLimitManager
     private ?Store $store = null;
 
     private ?Deferrer $deferrer = null;
+
+    /** @var (Closure(RequestDeferred|RequestAllowed|RateLimitReset): void)|null */
+    private ?Closure $recorder = null;
 
     /**
      * Stores resolved from config, keyed by their configuration, shared for the
@@ -76,6 +83,22 @@ class RateLimitManager
     }
 
     /**
+     * A copy whose limits also hand every event they raise to `$recorder` — how the fake keeps
+     * recording what a `usingStore()` / `usingDeferrer()` / `releasingJob()` manager builds.
+     *
+     * @internal
+     *
+     * @param  Closure(RequestDeferred|RequestAllowed|RateLimitReset): void  $recorder
+     */
+    public function recordingTo(Closure $recorder): self
+    {
+        $clone = clone $this;
+        $clone->recorder = $recorder;
+
+        return $clone;
+    }
+
+    /**
      * The same manager, deferring by releasing a queued job back onto the queue instead of
      * sleeping the worker. `$job` exposes Laravel's `release(int $seconds)` (e.g. it uses
      * `InteractsWithQueue`); the attempt unwinds with a `JobReleasedException`, which the
@@ -97,13 +120,13 @@ class RateLimitManager
 
     public function make(Limit $limit): RateLimit
     {
-        return new RateLimit(
-            new Limiter(
-                limit: $limit,
-                store: $this->store(),
-                deferrer: $this->deferrer(),
-            ),
+        $limiter = new Limiter(
+            limit: $limit,
+            store: $this->store(),
+            deferrer: $this->deferrer(),
         );
+
+        return new RateLimit($this->recorder === null ? $limiter : $limiter->setRecorder($this->recorder));
     }
 
     /**

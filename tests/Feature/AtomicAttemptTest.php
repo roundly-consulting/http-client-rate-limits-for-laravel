@@ -203,7 +203,8 @@ it('locks the owner row before it reads any hit, inside one transaction', functi
     ));
     $firstHitRead = array_key_first(array_filter(
         $statements,
-        static fn (array $entry): bool => $entry[0] === 'select' && str_contains($entry[1], 'http_client_rate_limits"'),
+        // The hits table under either quoting: `"` (sqlite, postgres) or a backtick (mysql).
+        static fn (array $entry): bool => $entry[0] === 'select' && preg_match('/["`]http_client_rate_limits["`]/', $entry[1]) === 1,
     ));
 
     expect($statements[0][0])->toBe('update')

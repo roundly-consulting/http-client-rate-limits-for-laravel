@@ -6,6 +6,8 @@ All notable changes to `http-client-rate-limits-for-laravel` are documented in t
 
 ## Unreleased
 
+## 1.1.0 - 2026-10-05
+
 ### Changed
 
 - Limiter profiles no longer share the `global` bucket: a profile without `by` is keyed by its
@@ -18,6 +20,10 @@ All notable changes to `http-client-rate-limits-for-laravel` are documented in t
   and integers in the array now work as they do on their own.
 - The package now requires `roundly-consulting/crypto-for-laravel` (`^1.0`); Composer installs
   it with the package. The `DatabaseStore` uses its `Digest` for over-long keys.
+- Maintenance: CI also runs the test suite against MySQL 8.4, alongside SQLite and Postgres.
+- Maintenance: `composer.json` `homepage` and `support.docs` point to the package's
+  documentation page.
+- Documentation: the README hero image uses an absolute URL, so it shows on Packagist too.
 
 ### Fixed
 

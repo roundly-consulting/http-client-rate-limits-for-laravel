@@ -16,6 +16,8 @@ All notable changes to `http-client-rate-limits-for-laravel` are documented in t
   is not a `Limit`, a `RateLimit`, a profile name or an integer, instead of dropping it and
   running under a default 60-per-second `global` limit. Pass only those four; profile names
   and integers in the array now work as they do on their own.
+- The package now requires `roundly-consulting/crypto-for-laravel` (`^1.0`); Composer installs
+  it with the package. The `DatabaseStore` uses its `Digest` for over-long keys.
 
 ### Fixed
 
@@ -35,6 +37,10 @@ All notable changes to `http-client-rate-limits-for-laravel` are documented in t
   next second.
 - The `InMemoryStore` never dropped idle owners or expired penalties, so a long-running worker
   keyed per user kept growing. It now sweeps them at most once a minute.
+- A `by` key longer than about 248 characters overflowed the `DatabaseStore`'s 255-character
+  `owner` columns: Postgres and strict MySQL threw on every request, and non-strict MySQL cut the
+  key short so the limit never matched. Such keys are now stored as their SHA-256 digest, for
+  hits and owner rows alike.
 
 ## 1.0.0 - 2026-10-03
 

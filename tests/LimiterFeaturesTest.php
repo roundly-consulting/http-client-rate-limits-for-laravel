@@ -596,3 +596,45 @@ it('caps a huge X-RateLimit-Reset instead of overflowing', function () {
 
     expect($store->penalizedUntil('api'))->toBe(1_000_000 + 86_400_000);
 });
+
+// Bug: ctype_digit() refused a fractional reset ("1790000030.250"), so a server asking for a
+// 30-second wait got none.
+it('honours a fractional X-RateLimit-Reset, rounding it up', function (string $reset, int $penaltyMs) {
+    $store = new InMemoryStore;
+    $now = 1_790_000_000_000;
+
+    $limiter = new Limiter(
+        limit: (new Limit(key: 'api', maxAttempts: 100, timespan: 'second'))->adaptive(),
+        store: $store,
+        deferrer: new TestDeferrer($now),
+    );
+
+    $limiter->handle(fn () => new Response(new PsrResponse(200, [
+        'X-RateLimit-Remaining' => '0',
+        'X-RateLimit-Reset' => $reset,
+    ])));
+
+    expect($store->penalizedUntil('api'))->toBe($now + $penaltyMs);
+})->with([
+    'epoch' => ['1790000030.250', 31_000],
+    'epoch, zero fraction' => ['1790000030.000', 30_000],
+    'delta' => ['2.5', 3_000],
+    'huge' => ['99999999999999999999.5', 86_400_000],
+]);
+
+it('still ignores an X-RateLimit-Reset that is not a non-negative number', function (string $reset) {
+    $store = new InMemoryStore;
+
+    $limiter = new Limiter(
+        limit: (new Limit(key: 'api', maxAttempts: 100, timespan: 'second'))->adaptive(),
+        store: $store,
+        deferrer: new TestDeferrer(1_000_000),
+    );
+
+    $limiter->handle(fn () => new Response(new PsrResponse(200, [
+        'X-RateLimit-Remaining' => '0',
+        'X-RateLimit-Reset' => $reset,
+    ])));
+
+    expect($store->penalizedUntil('api'))->toBeNull();
+})->with(['negative' => ['-30'], 'exponent' => ['1e3'], 'two points' => ['1.2.3']]);

@@ -454,7 +454,8 @@ final class Limiter
 
         $reset = $response->header('X-RateLimit-Reset');
 
-        if ($reset === '' || ! ctype_digit($reset)) {
+        // Whole or fractional seconds (`1790000030.250`), never negative.
+        if (preg_match('/\A(\d+)(?:\.(\d+))?\z/', $reset, $parts) !== 1) {
             return null;
         }
 
@@ -462,7 +463,7 @@ final class Limiter
         // clock is an epoch still to come; an epoch-sized value at or behind it
         // has already passed (clock skew, a slow response), so it asks for no
         // wait — read as a delta it would stall the limiter for decades.
-        $resetValue = (int) $reset;
+        $resetValue = self::ceilSeconds($parts[1], $parts[2] ?? '');
         $nowSeconds = intdiv($now, 1000);
 
         if ($resetValue > $nowSeconds) {
@@ -471,6 +472,17 @@ final class Limiter
         }
 
         return $resetValue >= self::EPOCH_THRESHOLD_SECONDS ? 0 : $resetValue;
+    }
+
+    /**
+     * `whole.fraction` seconds rounded up, without a float: the whole part's cast saturates at
+     * PHP_INT_MAX for an absurd header, where a float would lose its range.
+     */
+    protected static function ceilSeconds(string $whole, string $fraction): int
+    {
+        $seconds = (int) $whole;
+
+        return trim($fraction, '0') !== '' && $seconds < PHP_INT_MAX ? $seconds + 1 : $seconds;
     }
 
     protected function dispatch(RequestDeferred|RequestAllowed|RateLimitReset $event): void

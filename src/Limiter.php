@@ -6,6 +6,7 @@ namespace RoundlyConsulting\HttpClientRateLimits;
 
 use Closure;
 use GuzzleHttp\Promise\PromiseInterface;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Client\Response;
 use Psr\Http\Message\ResponseInterface;
 use RoundlyConsulting\HttpClientRateLimits\Deferrer\Deferrer;
@@ -154,7 +155,17 @@ final class Limiter
             timespan: $this->limit->getTimespanEnum(),
         ));
 
-        $result = $callback();
+        try {
+            $result = $callback();
+        } catch (RequestException $exception) {
+            // A callback that calls ->throw() hands the 429 back as an exception; the server's
+            // backoff is in its response all the same.
+            if ($this->shouldAdapt()) {
+                $this->adaptFromResult($exception->response);
+            }
+
+            throw $exception;
+        }
 
         if (! $this->shouldAdapt()) {
             return $result;

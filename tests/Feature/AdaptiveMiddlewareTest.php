@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Http\Client\Pool;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
 use RoundlyConsulting\HttpClientRateLimits\Facades\RateLimits;
 use RoundlyConsulting\HttpClientRateLimits\RateLimit;
@@ -155,4 +156,32 @@ it('keeps each profile without a by on its own budget, keyed by its name', funct
         ->and($fake->store()->penalizedUntil('global'))->toBeNull()
         ->and($fake->store()->hits('github:second'))->toHaveCount(1)
         ->and($fake->store()->hits('stripe:second'))->toHaveCount(1);
+});
+
+// Bug: with ->throw() the 429 left the callback as a RequestException before the limiter read
+// its headers, so an adaptive limit never recorded the server's backoff.
+it('records the backoff of a 429 the callback throws, then rethrows it', function () {
+    $store = new InMemoryStore;
+    rateLimitsUsing($store, new TestDeferrer(1_000_000));
+
+    Http::fake(['*' => Http::response('slow down', 429, ['Retry-After' => '30'])]);
+
+    expect(fn () => RateLimits::perMinute(100)->by('c7')->adaptive()
+        ->handle(fn () => Http::get('https://api.example.com/one')->throw()))
+        ->toThrow(RequestException::class);
+
+    expect($store->penalizedUntil('c7'))->toBe(1_000_000 + 30_000);
+});
+
+it('rethrows a thrown 429 untouched when the limit is not adaptive', function () {
+    $store = new InMemoryStore;
+    rateLimitsUsing($store, new TestDeferrer(1_000_000));
+
+    Http::fake(['*' => Http::response('slow down', 429, ['Retry-After' => '30'])]);
+
+    expect(fn () => RateLimits::perMinute(100)->by('c7-plain')
+        ->handle(fn () => Http::get('https://api.example.com/one')->throw()))
+        ->toThrow(RequestException::class);
+
+    expect($store->penalizedUntil('c7-plain'))->toBeNull();
 });

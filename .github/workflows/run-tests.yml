@@ -129,3 +129,64 @@ jobs:
         # Coverage is enforced on the sqlite matrix; this is a correctness leg, and
         # re-measuring it doubles the slowest job for no signal.
         run: vendor/bin/pest --ci
+
+  test-mysql:
+    runs-on: ubuntu-latest
+    name: P8.4 - mysql real-engine
+
+    # MySQL is a supported DatabaseStore engine and the one that disagrees on locking: InnoDB's
+    # REPEATABLE READ default reads a snapshot where postgres reads each commit. Redis rides
+    # along for the same reason as on the pgsql leg — without it the RedisStore cases skip.
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: testing
+          MYSQL_ROOT_PASSWORD: secret
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -psecret"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: 8.4
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, bcmath, intl, fileinfo, redis, pdo, sqlite, pdo_sqlite, mysql, pdo_mysql
+          coverage: none
+
+      - name: Install Lua 5.1
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq lua5.1
+
+      - name: Install dependencies
+        run: composer update --prefer-stable --prefer-dist --no-interaction
+
+      - name: Execute tests against mysql
+        env:
+          # As on the pgsql leg: TESTING_DB_DRIVER is what moves the suite off sqlite.
+          TESTING_DB_DRIVER: mysql
+          TESTING_DB_HOST: 127.0.0.1
+          TESTING_DB_PORT: 3306
+          TESTING_DB_DATABASE: testing
+          TESTING_DB_USERNAME: root
+          TESTING_DB_PASSWORD: secret
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: 6379
+        # Correctness leg, like pgsql: coverage stays on the sqlite matrix.
+        run: vendor/bin/pest --ci

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace RoundlyConsulting\HttpClientRateLimits;
 
 use Illuminate\Http\Client\PendingRequest;
+use RoundlyConsulting\HttpClientRateLimits\Exceptions\InvalidLimitException;
 use RoundlyConsulting\HttpClientRateLimits\Support\ConfigValue;
 use RoundlyConsulting\PackageToolkit\Package;
 use RoundlyConsulting\PackageToolkit\PackageServiceProvider;
@@ -62,10 +63,17 @@ final class HttpClientRateLimitsServiceProvider extends PackageServiceProvider
             $middleware = match (true) {
                 $limit instanceof RateLimit => $limit,
                 $limit instanceof Limit => $manager->make($limit),
-                is_array($limit) => $manager->compound(array_values(array_filter(
-                    $limit,
-                    static fn (mixed $entry): bool => $entry instanceof Limit || $entry instanceof RateLimit,
-                ))),
+                // Each entry reads as it would alone; anything else, or no entry at all, throws
+                // rather than quietly running under a default limit.
+                is_array($limit) => $manager->compound(array_map(
+                    static fn (mixed $entry): Limit|RateLimit => match (true) {
+                        $entry instanceof Limit, $entry instanceof RateLimit => $entry,
+                        is_string($entry) => $manager->profile($entry),
+                        is_int($entry) => $manager->perMinute($entry),
+                        default => throw InvalidLimitException::arrayEntry($entry),
+                    },
+                    $limit === [] ? throw InvalidLimitException::emptyArray() : array_values($limit),
+                )),
                 is_string($limit) => $manager->profile($limit), // named profile
                 default => $manager->perMinute($limit), // int shorthand = per-minute
             };

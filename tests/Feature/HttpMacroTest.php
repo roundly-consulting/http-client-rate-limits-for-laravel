@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\Http;
+use RoundlyConsulting\HttpClientRateLimits\Exceptions\InvalidLimitException;
 use RoundlyConsulting\HttpClientRateLimits\Facades\RateLimits;
 use RoundlyConsulting\HttpClientRateLimits\Limit;
 use RoundlyConsulting\HttpClientRateLimits\Store\InMemoryStore;
@@ -139,3 +140,44 @@ it('re-keys a copy, never the RateLimit or Limit the caller passed', function ()
         ->and($store->hits('acct-1:hour'))->toHaveCount(1)
         ->and($store->hits('global:second'))->toBe([]);
 });
+
+// Bug: the array form kept only Limit/RateLimit entries, so a profile name or an integer was
+// dropped and the request ran under a default 60/second limit on the global key.
+it('resolves profile names and per-minute integers inside an array', function () {
+    config()->set('http-client-rate-limits.limiters', [
+        'github' => ['rate' => 5, 'per' => 'second', 'by' => 'gh'],
+    ]);
+
+    $store = RateLimits::fake()->store();
+
+    Http::rateLimit(['github', 30])->get('https://api.example.com/one');
+
+    expect($store->hits('gh:second'))->toHaveCount(1)
+        ->and($store->hits('global:minute'))->toHaveCount(1)
+        ->and($store->hits('global:second'))->toBe([]);
+});
+
+it('reads an integer inside an array as that many per minute', function () {
+    $fake = RateLimits::fake();
+
+    foreach (range(1, 31) as $ignored) {
+        Http::rateLimit([30])->get('https://api.example.com/things');
+    }
+
+    expect($fake->deferrer()->deferCount())->toBe(1)
+        ->and($fake->store()->hits('global:minute'))->toHaveCount(31)
+        ->and($fake->store()->hits('global:second'))->toBe([]);
+});
+
+it('refuses an array entry it cannot turn into a limit', function (mixed $entry) {
+    Http::rateLimit([RateLimits::perSecond(5), $entry]);
+})->with([
+    'float' => [1.5],
+    'null' => [null],
+    'object' => [new stdClass],
+    'nested array' => [[5]],
+])->throws(InvalidLimitException::class, 'Http::rateLimit() takes a Limit, a RateLimit, a profile name or a per-minute integer');
+
+it('refuses an empty array instead of falling back to a default limit', function () {
+    Http::rateLimit([]);
+})->throws(InvalidLimitException::class, 'Http::rateLimit() needs at least one limit');

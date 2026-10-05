@@ -212,3 +212,18 @@ it('still records a limit built before the fake was swapped in, once', function 
 
     expect($fake->allowedCount())->toBe(1);
 });
+
+// Bug: the fake's clock was frozen when it was built, so after travelling past the window the
+// fake still deferred 60 s where the real SleepDeferrer sends at once.
+it('follows Carbon test time, like the real deferrer', function () {
+    $fake = RateLimits::fake();
+
+    Http::rateLimit(1)->get('https://api.example.com/one');
+    $this->travel(61)->seconds();
+    Http::rateLimit(1)->get('https://api.example.com/two');
+
+    $fake->assertNothingDeferred();
+
+    expect($fake->deferrer()->defers())->toBe([])
+        ->and($fake->allowedCount())->toBe(2);
+});

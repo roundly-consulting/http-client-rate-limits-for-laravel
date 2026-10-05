@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\HttpClientRateLimits\Store;
 
-use Illuminate\Database\ConnectionInterface;
+use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Builder;
 use RoundlyConsulting\HttpClientRateLimits\DataTransferObjects\AttemptResult;
 use RoundlyConsulting\HttpClientRateLimits\Models\RateLimitHit;
@@ -21,6 +21,11 @@ use RoundlyConsulting\HttpClientRateLimits\Support\Windows;
  * Postgres and the database write lock on SQLite, so a second worker's attempt on the same
  * key waits until the first has checked AND recorded. Owner rows are created race-free
  * through their unique `owner` column.
+ *
+ * On MySQL/MariaDB the attempt reads penalties and hits with locking reads. Their default
+ * REPEATABLE READ answers a plain read from the snapshot the transaction's first read took —
+ * before a later owner lock was won, or while a host transaction it runs in was open — and
+ * would miss hits other workers committed since. A locking read sees the latest commit.
  */
 final class DatabaseStore implements Store
 {
@@ -37,10 +42,12 @@ final class DatabaseStore implements Store
         $result = $this->connection()->transaction(function () use ($limits, $timestamp): AttemptResult {
             $penalties = $this->lockOwners(Windows::ownerKeys($limits), $timestamp);
 
+            $locking = $this->readsNeedLocks();
+
             $result = Windows::evaluate(
                 $limits,
                 $timestamp,
-                $this->hitsSince(...),
+                fn (string $owner, int $since): array => $this->readHits($owner, $since, $locking),
                 static fn (string $owner): ?int => $penalties[$owner] ?? null,
             );
 
@@ -93,9 +100,18 @@ final class DatabaseStore implements Store
      */
     public function hitsSince(string $owner, int $timestamp): array
     {
+        return $this->readHits($owner, $timestamp, locking: false);
+    }
+
+    /**
+     * @return list<int>
+     */
+    protected function readHits(string $owner, int $timestamp, bool $locking): array
+    {
         $hits = $this->hitRows()
             ->where('owner', $owner)
             ->where('hit_at', '>=', $timestamp)
+            ->when($locking, static fn (Builder $query): Builder => $query->sharedLock())
             ->orderBy('hit_at')
             ->pluck('hit_at')
             ->all();
@@ -148,6 +164,7 @@ final class DatabaseStore implements Store
     protected function lockOwners(array $owners, int $timestamp): array
     {
         $penalties = [];
+        $locking = $this->readsNeedLocks();
 
         foreach ($owners as $owner) {
             if ($this->touch($owner, $timestamp) === 0) {
@@ -157,11 +174,24 @@ final class DatabaseStore implements Store
                 $this->touch($owner, $timestamp);
             }
 
-            $value = $this->ownerRows()->where('owner', $owner)->value('penalized_until');
+            $value = $this->ownerRows()
+                ->where('owner', $owner)
+                ->when($locking, static fn (Builder $query): Builder => $query->sharedLock())
+                ->value('penalized_until');
             $penalties[$owner] = is_numeric($value) ? (int) $value : null;
         }
 
         return $penalties;
+    }
+
+    /**
+     * Whether reads inside an attempt must lock to see the latest commit: on MySQL/MariaDB,
+     * whose REPEATABLE READ default otherwise reads an older snapshot. Postgres reads committed
+     * data per statement, and SQLite holds the whole database while the attempt runs.
+     */
+    protected function readsNeedLocks(): bool
+    {
+        return in_array($this->connection()->getDriverName(), ['mysql', 'mariadb'], true);
     }
 
     protected function touch(string $owner, int $timestamp): int
@@ -211,7 +241,7 @@ final class DatabaseStore implements Store
         return RateLimitOwner::on($this->connection)->withTrashed();
     }
 
-    protected function connection(): ConnectionInterface
+    protected function connection(): Connection
     {
         return (new RateLimitHit)->setConnection($this->connection)->getConnection();
     }

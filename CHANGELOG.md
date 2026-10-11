@@ -6,6 +6,11 @@ All notable changes to `http-client-rate-limits-for-laravel` are documented in t
 
 ## Unreleased
 
+### Changed
+
+- Maintenance: requires the latest roundly packages — package-toolkit `^1.3.0`, crypto `^1.1.2`,
+  enums `^1.1.0`; dev: testing `^1.2.1`.
+
 ## 1.1.0 - 2026-10-05
 
 ### Changed

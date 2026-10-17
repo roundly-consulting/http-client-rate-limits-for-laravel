@@ -32,4 +32,12 @@ abstract class TestCase extends PackageTestCase
     {
         return [HttpClientRateLimitsServiceProvider::class];
     }
+
+    /**
+     * Migrate once per worker and schema signature, then reset only the data between tests.
+     */
+    protected function keepsMigratedSchema(): bool
+    {
+        return true;
+    }
 }
